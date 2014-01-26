@@ -4,17 +4,18 @@ package main
 //import "flag"
 //import "os"
 //import "io"
-import . "leb/mpdm/bitstream"
-//import . "leb/mpdm/iso111722"
+import "leb/mpeg-decoder/bitstream"
+import "leb/mpeg-decoder/iso11172"
 
 func main() {
+var ms iso11172.MpegState
 
-	bs, err := NewFromFile("bike.mpg")
+	bs, err := bitstream.NewFromFile("bike.mpg")
 	if err != nil {
 		panic("bad filename")
 	}
-
-	bs.ReadMPEG1Steam()
+	ms.Bitstream = bs
+	ms.ReadMPEG1Steam()
 }
 
 

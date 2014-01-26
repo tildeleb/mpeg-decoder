@@ -2,18 +2,162 @@
 
 package bitstream_test
 
-import . "leb/mpdm/bitstream"
+import . "leb/mpeg-decoder/bitstream"
 //import "flag"
-//import "fmt"
+import "fmt"
+import "math/rand"
+import "math"
 import "testing"
 
-var mpeg1Stream []byte = []byte{
-0x00, 0x00, 0x01, 0xB3, 0x02, 0x00, 0x10, 0x14, 0xFF, 0xFF, 0xE0,
-0xA0, 0x00, 0x00, 0x01, 0xB8, 0x80, 0x08, 0x00, 0x40, 0x00, 0x00, 0x01,
-0x00, 0x00, 0x0F, 0xFF, 0xF8, 0x00, 0x00, 0x01, 0x01, 0xFA, 0x96,
-0x52, 0x94, 0x88, 0xAA, 0x25, 0x29, 0x48, 0x88, 0x00, 0x00, 0x01, 0xB7}
-
-func Test(t *testing.T) {
-	bs, _ := NewFromMemory(mpeg1Stream)
-	bs.ReadMPEG1Steam()
+var r = rand.Float64
+const maxbitlen = 32
+const nBytes = 1000000 // 500*1024*1024
+const nEntries = 100000
+var bits []byte
+type info struct {
+	blen	uint
+	value	uint32
 }
+var data []info
+var dist [33]uint
+
+
+func rbetween(a int, b int) int {
+	rf := r()
+	diff := float64(b - a + 1)
+	r2 := rf * diff
+	r3 := r2 + float64(a)
+	//fmt.Printf("rbetween: a=%d, b=%d, rf=%f, diff=%f, r2=%f, r3=%f\n", a, b, rf, diff, r2, r3)
+	ret := int(r3)
+	return ret
+}
+
+func dumpDist() {
+	for k, v := range dist {
+		fmt.Printf("dist[%d]=%d\n", k, v)
+	}
+}
+
+func put(tdata *uint64, tblen *uint64, tbitlen *uint64) {
+	var mask uint64
+	for *tblen >= 8 {
+		newbyte := byte((*tdata >> (*tblen - 8))&0xFF)
+		bits = append(bits, newbyte)
+		//fmt.Printf("put: tblen=%d, tbitlen=%d, tdata=0x%08x, newbyte=0x%02x\n", *tblen, *tbitlen, *tdata, newbyte)
+		mask = 0xFF
+		mask = ^(mask << (*tblen - 8))
+		*tdata &= mask
+		*tblen -= 8
+		*tbitlen += 8
+		//fmt.Printf("put: tblen=%d, tbitlen=%d, tdata=0x%08x, mask=0x%08x\n", *tblen, *tbitlen, *tdata, mask)
+	}
+}
+
+func fill_random(nvalues int) (tbitlen uint64) {
+var tdata	uint64	// buffer where bits are stored, drained to less than 8 bits, after data is added
+var tblen	uint64	// used to keep track of how many bit used in the above buffer
+var sav		uint64
+var tmp		uint64
+
+	bits = nil
+	data = make([]info, nvalues)
+	for k := range data {
+		v := &data[k]
+		for {
+			v.blen = uint(rbetween(1, 32))
+			if true { // v.blen % 4 == 0
+				break
+			}
+		}
+		v.value = uint32(rbetween(0, int(math.Exp2(float64(v.blen))-1)))
+
+		//fmt.Printf("value=0x%x, blen=%d\n", v.value, v.blen)
+		tdata <<= v.blen
+		tdata |= uint64(v.value)
+		tblen += uint64(v.blen)
+		put(&tdata, &tblen, &tbitlen)
+		dist[v.blen]++
+		//fmt.Printf("k=%d, blen=%d, value=0x%x\n", k, v.blen, v.value)
+	}
+	sav = tblen
+	//fmt.Printf("tblen=%d, ", tblen)
+	for {
+		if tblen == 0 || tblen >= 8 {
+			break
+		}
+		tdata <<= 1 // fill with zeros
+		tblen++
+	}
+	//fmt.Printf("%d bits filled\n", tblen - sav)
+	sav++
+	put(&tdata, &tblen, &tmp) // don't include fill in bitlen
+	return
+}
+
+func fill_FF(nbytes int) (tbits int) {
+	bits = make([]byte, nbytes)
+	//fmt.Printf("nbytes=%d, len(bits)=%d\n", nbytes, len(bits))
+	for i := range bits {
+		bits[i] = 0xFF
+	}
+	return nbytes*8
+}
+
+
+func TestFF(t *testing.T) {
+	var mbits = maxbitlen
+
+	defer func() {
+		if p := recover(); p != nil {
+			if p == "EOF" {
+				return
+			}
+			fmt.Printf("unknown error: %v", p)
+			return
+		}
+	}()
+
+	fmt.Printf("TestFF\n")
+	bits = nil
+	tbits := fill_FF(nBytes)
+	bs, _ := NewFromMemory(bits)
+
+	for nbits := tbits; nbits > 0; {
+		if (nbits < mbits) {
+			//fmt.Printf("Test_FF: mbits=%d, setting mbits to %d\n", mbits, nbits)
+			mbits = nbits
+		}
+		blen := uint(rbetween(0, mbits))
+		pvalue := bs.Peekbits(blen)
+		value := bs.Getbits(blen)
+		comp := uint32((1<<uint32(blen))-1)
+		//fmt.Printf("Test_FF: nbits=%d, blen=%d, value=%d, value=0x%x\n", nbits, blen, value, value)
+		if value != comp {
+			fmt.Printf("Test_FF: ERROR: blen=%d, value=0x%x, comp=0x%x\n", blen, value, comp)
+		}
+
+		if pvalue != comp {
+			fmt.Printf("Test_FF: bs.Peekbits: blen=%d, value=0x%x, comp=0x%x\n", blen, pvalue, comp)
+		}
+
+		nbits -= int(blen)
+		//fmt.Printf("Test_FF: nbits=%d, blen=%d\n", nbits, blen)
+	}
+	fmt.Printf("Test_FF: tested tbits=%d\n", tbits)
+}
+
+func TestRandom(t *testing.T) {
+	fmt.Printf("TestRandom\n")
+	tbits := fill_random(nEntries)
+	//dumpDist()
+	bs, _ := NewFromMemory(bits)
+	for k, v := range data {
+		// fmt.Printf("value=0x%x, blen=%d\n", v.value, v.blen)
+		value := bs.Getbits(v.blen)
+		if (value != v.value) {
+			fmt.Printf("TestRandom: ERROR: k=%d, blen=%d, v.value=0x%x, value=0x%x \n", k, v.blen, v.value, value)
+		}
+	}
+	fmt.Printf("TestRandom: tested %d entries with tbits=%d\n", len(data), tbits)
+}
+
