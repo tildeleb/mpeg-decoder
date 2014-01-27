@@ -5,10 +5,14 @@ import "fmt"
 import "os"
 import "io"
 
+// this package implements reading from a steam of bytes 1-32 bits at a time
+// various routines are provided to read or peek 1-32 bits and to read a variable
+// number of bits into an int8, int16, int32, or int64 or their unsigned counterparts
 // basic stragey is to maintain 2 x 32 bit buffers bufc (current) and bufn (next)
-// get bits from bufc, if not more copy bufn to bufc and refill bufn
-// these means we typically fetch 4 bytes, one at a time to be divorced from endianess
-// now that it's been ported to go we could change this to 64 bits
+// bufc is a shift register, bit come off the MSB side because MPEG is big-endian based
+// get bits from bufc, if not enought bits are available, copy bufn to bufc and repeat
+// we typically fetch 4 bytes, one at a time to be divorced from endianess
+// still unoptimized speed appears to be about 250 Mbit/sec on my 2.5 GHz i7
 type Bitstream struct {
 	file			*os.File	// file pointer of stream
 	r				io.Reader	// interface to read bytes from
@@ -19,7 +23,7 @@ type Bitstream struct {
 	bufc			uint32		// current buf, the next bits come from here. If not enough copy bufn to here (bufc)
 	bits			uint		// the number of bits remaining in bufc can be 1-32, if 0 we get more
 	rbits			uint64		// the total number of bits read so far
-	tbits			uint64		// total bit available
+	tbits			uint64		// total bits available
 	eof				bool		// have reached eof, no more bits to be had
 }
 
@@ -105,6 +109,18 @@ type Memory struct {
 	buf		[]byte
 }
 
+func NewFromMemory(b []byte) (*Bitstream, error) {
+	//fmt.Printf("bitstream.NewFromMemory\n")
+	bs := Init()
+	bs.tbits = uint64(len(b) * 8)
+	m := Memory{b}
+	//fmt.Printf("bitstream.New: New Ok\n")
+	bs.r = &m
+	//fmt.Printf("bitstream.New: bs.r=%v, bs.r=%p\n", bs.r, bs.r)
+	bs.readbits()
+	return bs, nil
+}
+
 // Read reads up to len(b) bytes from memory.
 // It returns the number of bytes read.
 // EOF is signaled by a zero count with err set to io.EOF.
@@ -130,19 +146,6 @@ func (m *Memory) Read(b []byte) (n int, err error) {
     m.buf = m.buf[n:]
 	//fmt.Printf("Memory.Read: A len(m.buf)=%d, cap(m.buf)=%d\n", len(m.buf), cap(m.buf))
     return n, nil
-}
-
-
-func NewFromMemory(b []byte) (*Bitstream, error) {
-	//fmt.Printf("bitstream.NewFromMemory\n")
-	bs := Init()
-	bs.tbits = uint64(len(b) * 8)
-	m := Memory{b}
-	//fmt.Printf("bitstream.New: New Ok\n")
-	bs.r = &m
-	//fmt.Printf("bitstream.New: bs.r=%v, bs.r=%p\n", bs.r, bs.r)
-	bs.readbits()
-	return bs, nil
 }
 
 func (bs *Bitstream) readbits() error {
@@ -257,6 +260,9 @@ func (bs *Bitstream) peekbits2(bits uint) (uint32, error) {
 var rbits uint = bits
 var ret uint32 = 0
 
+	//fmt.Printf("bitstream.peekbits2: rbits=%d/tbits=%d, bits=%d, nbits=%d, eof=%v, rbits=%d\n", bs.rbits, bs.tbits, bs.bits, bs.nbits, bs.eof, bits);
+	//fmt.Printf("bitstream.peekbits2: bs.bufc=0x%x, bs.bits=%d, bs.bufn=0x%x bs.nbits=%d\n", bs.bufc, bs.bits, bs.bufn, bs.nbits)
+
 	//fmt.Printf("bitstream.peekbits2: bits=%d, nbits=%d, eof=%v, rbits=%d\n", bs.bits, bs.nbits, bs.eof, bits);
 	if bs.eof == true  && bs.bits == 0 && bs.nbits == 0 {
 		return 0, io.EOF
@@ -269,9 +275,11 @@ var ret uint32 = 0
 			rbits = bits - bs.bits
 			ret = (bs.bufc&((1<<bs.bits)-1)) << rbits
 		}
-		ret |= bs.bufn&(((1<<rbits)-1))
+
+		ret |= ((bs.bufn>>(bs.nbits - rbits))&((1<<rbits)-1))
 	}
 	//fmt.Printf("bitstream.peekbits2: bits=%d, nbits=%d, eof=%v, rbits=%d, ret=0x%x\n", bs.bits, bs.nbits, bs.eof, bits, ret);
+	//fmt.Printf("bitstream.peekbits2: rbits=%d/tbits=%d, bits=%d, nbits=%d, eof=%v, rbits=%d, ret=0x%x\n", bs.rbits, bs.tbits, bs.bits, bs.nbits, bs.eof, bits, ret);
 	return ret, nil
 }
 

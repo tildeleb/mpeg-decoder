@@ -1087,6 +1087,8 @@ func (ms *MpegState) ReadMacroBlock(mbh *MacroBlockHeader, i int) {
 		if ms.Peekbits(2) == EOB {
 			_ = ms.Getbits(2)
 			return
+		} else {
+			fmt.Printf("iso.ReadMacroBlock no EOB, bits2=0x%x\n", ms.Peekbits(2))
 		}
 		fmt.Printf("iso.ReadMacroBlock: getting coef\n")
 		run, level := ms.DecodeDCTCoeff(true)

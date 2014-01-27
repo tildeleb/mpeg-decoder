@@ -12,7 +12,7 @@ import "testing"
 var r = rand.Float64
 const maxbitlen = 32
 const nBytes = 1000000 // 500*1024*1024
-const nEntries = 100000
+const nEntries = 1000 * 1000 /// 
 var bits []byte
 type info struct {
 	blen	uint
@@ -132,12 +132,12 @@ func TestFF(t *testing.T) {
 		value := bs.Getbits(blen)
 		comp := uint32((1<<uint32(blen))-1)
 		//fmt.Printf("Test_FF: nbits=%d, blen=%d, value=%d, value=0x%x\n", nbits, blen, value, value)
-		if value != comp {
-			fmt.Printf("Test_FF: ERROR: blen=%d, value=0x%x, comp=0x%x\n", blen, value, comp)
-		}
 
 		if pvalue != comp {
-			fmt.Printf("Test_FF: bs.Peekbits: blen=%d, value=0x%x, comp=0x%x\n", blen, pvalue, comp)
+			fmt.Printf("Test_FF: bs.Peekbits ERROR: blen=%d, value=0x%x, comp=0x%x\n", blen, pvalue, comp)
+		}
+		if value != comp {
+			fmt.Printf("Test_FF: bs.Getbits  ERROR: blen=%d, value=0x%x, comp=0x%x\n", blen, value, comp)
 		}
 
 		nbits -= int(blen)
@@ -153,9 +153,13 @@ func TestRandom(t *testing.T) {
 	bs, _ := NewFromMemory(bits)
 	for k, v := range data {
 		// fmt.Printf("value=0x%x, blen=%d\n", v.value, v.blen)
+		pvalue := bs.Peekbits(v.blen)
 		value := bs.Getbits(v.blen)
+		if (pvalue != v.value) {
+			fmt.Printf("TestRandom: bs.Peekbits ERROR: k=%d, blen=%d, v.value=0x%x, value=0x%x \n", k, v.blen, v.value, value)
+		}
 		if (value != v.value) {
-			fmt.Printf("TestRandom: ERROR: k=%d, blen=%d, v.value=0x%x, value=0x%x \n", k, v.blen, v.value, value)
+			fmt.Printf("TestRandom: bs.Getbits  ERROR: k=%d, blen=%d, v.value=0x%x, value=0x%x \n", k, v.blen, v.value, value)
 		}
 	}
 	fmt.Printf("TestRandom: tested %d entries with tbits=%d\n", len(data), tbits)
