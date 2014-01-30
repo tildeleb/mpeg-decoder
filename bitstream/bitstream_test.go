@@ -38,21 +38,6 @@ func dumpDist() {
 	}
 }
 
-func put(tdata *uint64, tblen *uint64, tbitlen *uint64) {
-	var mask uint64
-	for *tblen >= 8 {
-		newbyte := byte((*tdata >> (*tblen - 8))&0xFF)
-		bits = append(bits, newbyte)
-		//fmt.Printf("put: tblen=%d, tbitlen=%d, tdata=0x%08x, newbyte=0x%02x\n", *tblen, *tbitlen, *tdata, newbyte)
-		mask = 0xFF
-		mask = ^(mask << (*tblen - 8))
-		*tdata &= mask
-		*tblen -= 8
-		*tbitlen += 8
-		//fmt.Printf("put: tblen=%d, tbitlen=%d, tdata=0x%08x, mask=0x%08x\n", *tblen, *tbitlen, *tdata, mask)
-	}
-}
-
 func fill_random(nvalues int) (tbitlen uint64) {
 var tdata	uint64	// buffer where bits are stored, drained to less than 8 bits, after data is added
 var tblen	uint64	// used to keep track of how many bit used in the above buffer
@@ -72,10 +57,7 @@ var tmp		uint64
 		v.value = uint32(rbetween(0, int(math.Exp2(float64(v.blen))-1)))
 
 		//fmt.Printf("value=0x%x, blen=%d\n", v.value, v.blen)
-		tdata <<= v.blen
-		tdata |= uint64(v.value)
-		tblen += uint64(v.blen)
-		put(&tdata, &tblen, &tbitlen)
+		bitstream.Put(bits, v.value, v.blen, &tdata, &tblen, &tbitlen)
 		dist[v.blen]++
 		//fmt.Printf("k=%d, blen=%d, value=0x%x\n", k, v.blen, v.value)
 	}

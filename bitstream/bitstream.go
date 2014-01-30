@@ -5,7 +5,8 @@ import "fmt"
 import "os"
 import "io"
 
-// this package implements reading from a steam of bytes 1-32 bits at a time
+// this package implements reading a variable length bitstream from a steam of bytes
+// 1-32 bits at a time. There is limited support for writing a variable length bitstream
 // various routines are provided to read or peek 1-32 bits and to read a variable
 // number of bits into an int8, int16, int32, or int64 or their unsigned counterparts
 // basic stragey is to maintain 2 x 32 bit buffers bufc (current) and bufn (next)
@@ -16,6 +17,7 @@ import "io"
 type Bitstream struct {
 	file			*os.File	// file pointer of stream
 	r				io.Reader	// interface to read bytes from
+	w				io.Writer	// interface to write bytes to
 	buf				[]byte		// read buffer
 	bp				[]byte		// slice into read buffer
 	bufn			uint32		// next buf, next 32 bits usually, number of bits defined by nbits
@@ -23,10 +25,10 @@ type Bitstream struct {
 	bufc			uint32		// current buf, the next bits come from here. If not enough copy bufn to here (bufc)
 	bits			uint		// the number of bits remaining in bufc can be 1-32, if 0 we get more
 	rbits			uint64		// the total number of bits read so far
+	wbits			uint64		// total bits written so far
 	tbits			uint64		// total bits available
 	eof				bool		// have reached eof, no more bits to be had
 }
-
 
 /*
 bool
@@ -91,17 +93,38 @@ func Dump(buf []byte, max ...int) {
 	fmt.Printf("\n")
 }
 
-func NewFromFile(path string) (*Bitstream, error) {
+func NewFromFile(path string, mode string) (*Bitstream, error) {
+	var omode os.FileMode
+
 	fmt.Printf("bitstream.NewFromFile: New path=%q\n", path)
 	bs := Init()
-	if err := bs.Open(path, 0666); err != nil {
+
+	switch mode {
+	case "r":
+		omode = 0400
+	case "w":
+		omode = 0666
+	default:
+		panic("NewFromMemory: bad mode")
+	}
+
+	if err := bs.Open(path, omode); err != nil {
 		fmt.Printf("bitstream.NewFromFile: New Error\n")
 		return nil, err
 	}
 	fmt.Printf("bitstream.NewFromFile: New Ok\n")
-	bs.r = bs.file
+
+	switch mode {
+	case "r":
+		bs.r = bs.file
+		bs.readbits()
+	case "w":
+		bs.w = bs.file
+	default:
+		panic("NewFromMemory: bad mode 2")
+	}
+
 	//fmt.Printf("bitstream.NewFromFile: bs.r=%v, bs.r=%p\n", bs.r, bs.r)
-	bs.readbits()
 	return bs, nil
 }
 
@@ -109,7 +132,7 @@ type Memory struct {
 	buf		[]byte
 }
 
-func NewFromMemory(b []byte) (*Bitstream, error) {
+func NewFromMemory(b []byte, mode string) (*Bitstream, error) {
 	//fmt.Printf("bitstream.NewFromMemory\n")
 	bs := Init()
 	bs.tbits = uint64(len(b) * 8)
@@ -117,7 +140,13 @@ func NewFromMemory(b []byte) (*Bitstream, error) {
 	//fmt.Printf("bitstream.New: New Ok\n")
 	bs.r = &m
 	//fmt.Printf("bitstream.New: bs.r=%v, bs.r=%p\n", bs.r, bs.r)
-	bs.readbits()
+	switch mode {
+	case "r":
+	 	bs.readbits()
+	case "w":
+	default:
+		panic("NewFromMemory: bad mode")
+	}
 	return bs, nil
 }
 
@@ -146,6 +175,29 @@ func (m *Memory) Read(b []byte) (n int, err error) {
     m.buf = m.buf[n:]
 	//fmt.Printf("Memory.Read: A len(m.buf)=%d, cap(m.buf)=%d\n", len(m.buf), cap(m.buf))
     return n, nil
+}
+
+
+// Write writes len(b) bytes to memory.
+// It returns the number of bytes written and an error, if any.
+// Write returns a non-nil error when n != len(b).
+func (m *Memory) Write(b []byte) (n int, err error) {
+        if m == nil {
+                return 0, os.ErrInvalid
+        }
+
+	    if len(b) > len(m.buf) {
+	    	n = len(m.buf)
+	    } else {
+	    	n = len(b)
+	    }
+
+		for i := 0; i < n; i++ {
+			m.buf[i] = b[i]
+		}
+	    m.buf = m.buf[n:]
+
+        return n, nil
 }
 
 func (bs *Bitstream) readbits() error {
@@ -378,7 +430,7 @@ func (bs *Bitstream) Ruc() byte {
 		// panic("EOF")
 	}
 	ret = ret&0xFF
-	fmt.Printf("bitstream.ruc ret=0x%02x\n", ret)
+	//fmt.Printf("bitstream.ruc ret=0x%02x\n", ret)
 	return byte(ret)
 }
 
@@ -437,4 +489,47 @@ func (bs *Bitstream) Rucs(bits uint) byte {
 func (bs *Bitstream) Rcs(bits uint) int8 {
 	ret, _ := bs.getbits2(bits)
 	return int8(ret)
+}
+
+func (bs *Bitstream) Putbits(value uint32, blen uint) {
+	var mask uint32
+	var newbyte [1]byte
+	var slc = newbyte[:]
+
+	bs.bufc <<= blen
+	bs.bufc |= value
+	bs.bits += blen
+	bs.wbits += uint64(blen)
+	for bs.bits >= 8 {
+		newbyte[0]= byte((bs.bufc >> (bs.bits - 8))&0xFF)
+		bs.w.Write(slc)
+		mask = 0xFF
+		mask = ^(mask << (bs.bits - 8))
+		bs.bufc &= mask
+		bs.bits -= 8
+		//fmt.Printf("put: tblen=%d, tbitlen=%d, tdata=0x%08x, newbyte=0x%02x\n", *tblen, *tbitlen, *tdata, newbyte)
+	}
+	//fmt.Printf("put: tblen=%d, tbitlen=%d, tdata=0x%08x, mask=0x%08x\n", *tblen, *tbitlen, *tdata, mask)
+}
+
+// doesn't below here
+func Put(bits *[]byte, value uint32, blen uint, tdata *uint64, tblen *uint64, tbitlen *uint64) {
+	var mask uint64
+
+	//fmt.Printf("Put: len(bits)=%d\n", len(*bits))
+	*tdata <<= blen
+	*tdata |= uint64(value)
+	*tblen += uint64(blen)
+	for *tblen >= 8 {
+		newbyte := byte((*tdata >> (*tblen - 8))&0xFF)
+		*bits = append(*bits, newbyte)
+		//fmt.Printf("len(bits)=%d\n", len(*bits))
+		//fmt.Printf("put: tblen=%d, tbitlen=%d, tdata=0x%08x, newbyte=0x%02x\n", *tblen, *tbitlen, *tdata, newbyte)
+		mask = 0xFF
+		mask = ^(mask << (*tblen - 8))
+		*tdata &= mask
+		*tblen -= 8
+		*tbitlen += 8
+		//fmt.Printf("put: tblen=%d, tbitlen=%d, tdata=0x%08x, mask=0x%08x\n", *tblen, *tbitlen, *tdata, mask)
+	}
 }

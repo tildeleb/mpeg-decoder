@@ -528,11 +528,12 @@ func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
 
 	value := ms.Peekbits(17)
 	index := (value >> 5) & 0xfff
-	fmt.Printf("vlc.decodeDCTCoeff: value=%d, index=%d, first=%v\n", value, index, first)
+	//fmt.Printf("vlc.decodeDCTCoeff: value=0x%x, index=%d, first=%v\n", value, index, first)
 	switch {
 	case index >= 0x1 && index <= 0xf:
 		offset := (index << 5)			// Multiply by 32, the size of each original array
 		offset += (value & 0x1f)		// Get 5 least significant bits, which determine the offset within each array
+		//fmt.Printf("vlc.decodeDCTCoeff: offset=%d, max=%d\n", offset, len(dctCoefficients))
 		r, l, d = dctCoefficients[offset][0], dctCoefficients[offset][1], dctCoefficients[offset][2]
 	case index >= 0x10 && index <= 0x1f:
 		// Discard 4 least significant bits
@@ -555,7 +556,7 @@ func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
 		r, l, d = dctCoefficients4[offset][0], dctCoefficients4[offset][1], dctCoefficients4[offset][2]
 	default:
 		index = (value >> 13) & 0xf
-		fmt.Printf("vlc.decodeDCTCoeff: default index=%d\n", index)
+		//fmt.Printf("vlc.decodeDCTCoeff: default index=%d\n", index)
 		switch {
 		case index == 0x1:
 			dctCoefficients := [][3]int8{
@@ -573,7 +574,7 @@ func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
 			offset := (value >> 8) & 0x1f
 			r, l, d = dctCoefficients[offset][0], dctCoefficients[offset][1], dctCoefficients[offset][2]
 		case index == 0x3:
-			dctCoefficients = [][3]int8{{4, 1, 6}, {4, -1, 6}, {3, 1, 6}, {3, -1, 6}}
+			dctCoefficients := [][3]int8{{4, 1, 6}, {4, -1, 6}, {3, 1, 6}, {3, -1, 6}}
 			offset := (value >> 11) & 0x3
 			r, l, d = dctCoefficients[offset][0], dctCoefficients[offset][1], dctCoefficients[offset][2]
 		case index == 0x4:
@@ -598,8 +599,8 @@ func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
 			panic("bad")
 		}
 	}
-	fmt.Printf("vlc.decodeDCTCoeff: r=%d, l=%d d=%d, escape=%v\n", r, l, d, escape)
-	ms.Getbits(uint(d))
+	tmp := ms.Getbits(uint(d))
+	//fmt.Printf("vlc.decodeDCTCoeff: r=%d, l=%d, 0x%x/d=%d, escape=%v\n", r, l, tmp, d, escape)
 	run = int(r)
 	level = int(l)
 	if (escape) {
@@ -612,6 +613,15 @@ func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
 			level = int(ms.Rc())
 		}
 	}
-	fmt.Printf("vlc.decodeDCTCoeff: run=%d, level=%d\n", run, level)
+	tmp++ // hack
+	//fmt.Printf("vlc.decodeDCTCoeff: run=%d, level=%d\n", run, level)
 	return
+}
+
+func init() {
+	fmt.Printf("len(dctCoefficients)=%d\n", len(dctCoefficients))
+	fmt.Printf("len(dctCoefficients1)=%d\n", len(dctCoefficients1))
+	fmt.Printf("len(dctCoefficients2)=%d\n", len(dctCoefficients2))
+	fmt.Printf("len(dctCoefficients3)=%d\n", len(dctCoefficients3))
+	fmt.Printf("len(dctCoefficients4)=%d\n", len(dctCoefficients4))
 }

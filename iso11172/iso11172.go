@@ -373,7 +373,7 @@ var 			bits4a, bits4b, bits3, bits2, bits1 uint32
 			}
 		}
 	}
-	fmt.Printf("ReadMBAI: ret=%d\n", ret)
+	//fmt.Printf("ReadMBAI: ret=%d\n", ret)
 	return
 }
 
@@ -490,6 +490,7 @@ var			bits1 uint32
 			}
 		}
 		bits6 = ms.Getbits(6)
+		fmt.Printf("read_mb_type: 6 bit code-0x%x\n", bits6)
 		switch(bits6) {
 		case 0x01:
 			if pt == pt_ppict {
@@ -516,6 +517,7 @@ var			bits1 uint32
 				panic("read_mb_type: 0b000011 expected pt_bpict")
 			}
 		default:
+			fmt.Printf("read_mb_type: 6 bit code-0x%x\n", bits6)
 			panic("read_mb_type: bad 6 bit code")
 		}
 	case 0x01:	// all 5 bits codes
@@ -979,7 +981,7 @@ var		size int32
 	if (size > 0) {
 		ret = ms.ReadDCDC(size)
 	}
-	fmt.Printf("iso.ReadMBDCTDCY: %d\n", ret)
+	//fmt.Printf("iso.ReadMBDCTDCY: %d\n", ret)
 	return
 }
 
@@ -1014,7 +1016,7 @@ var		size int32
 	if size > 0 {
 		ret = ms.ReadDCDC(size)
 	}
-	fmt.Printf("iso.ReadMBDCTDCC: %d\n", ret)
+	//fmt.Printf("iso.ReadMBDCTDCC: %d\n", ret)
 	return
 }
 
@@ -1075,8 +1077,13 @@ func mbt_init(mbt *MacroBlockHeader, pt PictureType) {
             }
 */
 
+
+func (ms *MpegState) ReadMotionVectors(mbh *MacroBlockHeader, i int) {
+
+}
+
 func (ms *MpegState) ReadMacroBlock(mbh *MacroBlockHeader, i int) {
-	fmt.Printf("iso.ReadMacroBlock: i=%d\n", i)
+	//fmt.Printf("iso.ReadMacroBlock: i=%d\n", i)
 	if mbh.mbt_in {
 		switch i {
 		case 0, 1, 2, 3:
@@ -1088,18 +1095,23 @@ func (ms *MpegState) ReadMacroBlock(mbh *MacroBlockHeader, i int) {
 			_ = ms.Getbits(2)
 			return
 		} else {
-			fmt.Printf("iso.ReadMacroBlock no EOB, bits2=0x%x\n", ms.Peekbits(2))
+			pbits := ms.Peekbits(2)
+			//fmt.Printf("iso.ReadMacroBlock no EOB, bits2=0x%x\n", pbits)
+			pbits++
 		}
-		fmt.Printf("iso.ReadMacroBlock: getting coef\n")
+		//fmt.Printf("iso.ReadMacroBlock: getting coef\n")
 		run, level := ms.DecodeDCTCoeff(true)
-		fmt.Printf("iso.ReadMacroBlock: first run=%d, level=%d\n", run, level)
-
+		//fmt.Printf("iso.ReadMacroBlock: first run=%d, level=%d\n", run, level)
+		run++
+		level++
 
 		for ms.Peekbits(2) != EOB {
 			run, level := ms.DecodeDCTCoeff(false)
-			fmt.Printf("iso.ReadMacroBlock: run=%d, level=%d\n", run, level)
+			run++
+			level++
+			//fmt.Printf("iso.ReadMacroBlock: run=%d, level=%d\n", run, level)
 		}
-		fmt.Printf("iso.ReadMacroBlock: EOB\n")
+		//fmt.Printf("iso.ReadMacroBlock: EOB\n")
 		ms.Getbits(2)
 	}
 } 
