@@ -1,9 +1,11 @@
-// Copyright © 2012-2013 Lawrence E. Bakst. All rights reserved.
+// Copyright © 2012-2014 Lawrence E. Bakst. All rights reserved.
+
+// Test MPEG-1 vlc codes and make sure decoder gives proper r/l/d for each code
 
 package iso11172_test
 
 import "leb/mpeg-decoder/bitstream"
-import "leb/mpeg-decoder/iso11172"
+import . "leb/mpeg-decoder/iso11172"
 //import "flag"
 import "fmt"
 import "math/rand"
@@ -155,14 +157,18 @@ var vlcs []DCTvlc =  []DCTvlc{
 	{25, 1, 14, 0, &[]byte{0x0, 0x0, 0xE, 0x0}},
 	{26, 1, 14, 0, &[]byte{0x0, 0x0, 0xD, 0x1}},
 
-	{27, 2, 17, 0, &[]byte{0x0, 0x0, 0x1, 0xF}},
-	{28, 2, 17, 0, &[]byte{0x0, 0x0, 0x1, 0xE}},
-	{29, 2, 17, 0, &[]byte{0x0, 0x0, 0x1, 0xD}},
-	{30, 2, 17, 0, &[]byte{0x0, 0x0, 0x1, 0xC}},
-	{31, 2, 17, 0, &[]byte{0x0, 0x0, 0x1, 0xB}},
+	{27, 1, 17, 0, &[]byte{0x0, 0x0, 0x1, 0xF}},
+	{28, 1, 17, 0, &[]byte{0x0, 0x0, 0x1, 0xE}},
+	{29, 1, 17, 0, &[]byte{0x0, 0x0, 0x1, 0xD}},
+	{30, 1, 17, 0, &[]byte{0x0, 0x0, 0x1, 0xC}},
+	{31, 1, 17, 0, &[]byte{0x0, 0x0, 0x1, 0xB}},
 }
 
 func convert(b *[]byte, bits uint32, sign uint32, signif bool) (vlc uint32) {
+	if (bits < 2) {
+		panic("convert")
+	}
+	vlc = 0
 	if signif {
 		vlc = 1 // make leading zeros significant
 	}
@@ -173,10 +179,13 @@ func convert(b *[]byte, bits uint32, sign uint32, signif bool) (vlc uint32) {
 			vlc |= uint32(v)
 			bits -= 4
 		} else {
-			vlc <<= uint(bits)+1
-			vlc |= (uint32(v)<<1)|sign
+			vlc <<= uint(bits+1)
+			//fmt.Printf("vlc=0x%x\n", vlc)
+			vlc |= uint32(v << 1)|sign
+			//fmt.Printf("ret bits=%d, sign=%d, vlc=0x%x\n", bits, sign, vlc)
 			return
 		}
+		//fmt.Printf("vlc=0x%x\n", vlc)	
 	}
 	panic("convert: not enough bytes")
 }
@@ -189,7 +198,8 @@ func checkDup(r, l int) {
 	}
 }
 
-
+// interate through all the vlc codes in the table and check for dups of r and l
+// interate and store all vlc codes in a table and check for dups
 func TestVlc(t *testing.T) {
 //var ms MpegState
 
@@ -227,6 +237,29 @@ func rbetween(a int, b int) int {
 	return ret
 }
 
+func covbit(value int) uint32 {
+	if (value < 0) {
+		return 2
+	} else {
+		return 1
+	}
+}
+
+func coverage() float32 {
+	tot := 0
+	cov := 0
+	for i := range vlcs {
+		switch vlcs[i].vlc {
+		case 1, 2:
+			cov++
+		case 3:
+			cov += 2
+		}
+		tot += 2
+	}
+	return float32(cov)/float32(tot)*100.0
+}
+
 
 func TestVlc2(t *testing.T) {
 const maxbits uint64 = 1280000000
@@ -236,7 +269,7 @@ var tbitlen uint64 // total bits used
 var data []byte
 var cnt int
 var zero uint32
-var ms iso11172.MpegState
+var ms MpegState
 var sgn = func(s int) int {
 	if (s == 1) {
 		return -1
@@ -252,6 +285,7 @@ var sgn = func(s int) int {
 		i := rbetween(0, tableLen-1)
 		s := rbetween(0, 1)
 		r, l, b, d := vlcs[i].r, vlcs[i].l, vlcs[i].v,  vlcs[i].d
+		vlcs[i].vlc = 3
 		// convert(b *[]byte, bits uint32, sign uint32, signif bool) (vlc uint32)
 		vlc := convert(b, vlcs[i].d, uint32(s), false)
 		// func Put(bits []byte, value uint32, blen uint, tdata *uint64, tblen *uint64, tbitlen *uint64) {
@@ -262,17 +296,300 @@ var sgn = func(s int) int {
 		bitstream.Put(&data, vlc, uint(d), &tdata, &tblen, &tbitlen)
 		cnt++
 	}
-	bitstream.Put(&data, iso11172.EOB, 2, &tdata, &tblen, &tbitlen)
+	bitstream.Put(&data, EOB, 2, &tdata, &tblen, &tbitlen)
 	bitstream.Put(&data, zero, 32, &tdata, &tblen, &tbitlen)
 	bitstream.Put(&data, zero, 32, &tdata, &tblen, &tbitlen)
-	fmt.Printf("TestVlc2: len(data)=%d, %d bits in buffer\n", len(data), tbitlen)
+    // coverage
+	fmt.Printf("TestVlc2: len(data)=%d, %d bits in buffer, coverage=%0.2f%%\n",
+		len(data), tbitlen, coverage())
 	//bitstream.Dump(data, len(data))
 	ms.Bitstream, _ = bitstream.NewFromMemory(data, "r")
-	for ms.Peekbits(2) != iso11172.EOB {
+	for ms.Peekbits(2) != EOB {
 		r, l := ms.DecodeDCTCoeff(false)
 		//fmt.Printf("TestVlc2: r=%d, l=%d\n", r, l)
 		r++
 		l++
 	}
+}
+// encode run / level not in table
+// ecape 0b000011
+// 6 bits of binary coded run
+// followed by 8 or 16 bits of level
+// int8 for -127 to +128
+// unit8 of 0x00 followed by unit8 for 128 to 255
+// unit8 of 0x80 followed by unit8 for -128 to -255
+// for negative numbers complement the final uint8 and add one then covert to int * -1
+func construct(r, al int) (ret, d uint32) {
+	l := al
+	ret = ESCAPE
+	if r < 0 || r > 63 {
+		panic("construct: bad r")
+	}
+	ret <<= 6
+	//fmt.Printf("r=%d, r=0x%x, l=%d, l=0x%x\n", r, r, l, l)
+	ret |= uint32(r)
+	if l == 0 || l < -255 || l > 255 {
+		fmt.Printf("r=%d, r=0x%x, l=%d, l=0x%x\n", r, r, l, l)
+		panic("construct: bad l")
+	}
+	switch {
+	case l > 127:
+		ret <<= 8
+		ret |= 0x00
+		ret <<= 8
+		//fmt.Printf("00: l=%d, l=0x%x\n", l, l)
+		ret |= uint32(l&0xFF)
+		d = 28
+	case l < -127:
+		ret <<= 8
+		ret |= 0x80
+		u := uint32(l * -1)
+		u--
+		u = ^u
+		ret <<= 8
+		//fmt.Printf("80: u=%d, u=0x%x\n", u, u)
+		ret |= u&0xFF
+		d = 28
+	case l < 128 && l > -128:
+		i := int8(l)
+		u := uint32(uint8(i)&0xFF)
+		//fmt.Printf("short: l=%d, l=0x%x, i=%d, i=0x%x\n", l, l, u, u)
+		ret <<= 8
+		ret |= u
+		d = 20
+	default:
+		panic("construct: badder l")
+	}
+	//fmt.Printf("construct: r/l=%d/%d, vcs=0x%x/%d\n", r, l, ret, d)
+
+	return
+}
+
+
+// test all the values in the VLC table but not escape encoding
+func TestVlc3(t *testing.T) {
+	var matched, failed int
+
+	var abs = func(v int) int {
+		if (v <= 0) {
+			return -v
+		} else {
+			return v
+		}
+	}
+
+	var vlcSgn = func(s int) int {
+		if (s >= 0) {
+			return 0
+		} else {
+			return 1
+		}
+	}
+
+	fmt.Printf("TestVlc3\n")
+	//tableLen := len(vlcs)
+
+	total := 500000
+	found := 0
+	for i := 0; i < total; i++ {
+		r := rbetween(0, 63)
+		l := rbetween(-128, 127)
+		for i := range vlcs {
+			if vlcs[i].r == r && vlcs[i].l == abs(l) {
+				//fmt.Printf("found one: i=%d, r/l=%d/%d, %#v/%d, ", i, r, l, *vlcs[i].v, vlcs[i].d)
+				found++
+				vlcs[i].vlc |= covbit(l)
+				vlc := convert(vlcs[i].v, vlcs[i].d, uint32(vlcSgn(l)), false)
+				//fmt.Printf("convert vlc=0x%x\n", vlc)	
+				d := vlcs[i].d
+				for d < 17 {
+					vlc <<= 1
+					d++
+				}
+				r2, l2, _, _ := XdecodeDCTCoeff(vlc, false)
+				if r != int(r2) && l != int(l2) {
+					fmt.Printf("FAIL, didn't match vcs=0x%x/%d, r/l=%d/%d, r2/l2=%d/%d\n", vlc, vlcs[i].d, r, l, r2, l2)
+					failed++
+				} else {
+					matched++
+					//fmt.Printf("match, r=%d, l=%d\n", r, l)		
+				}
+			}
+		}
+	}
+	fmt.Printf("total=%d, found=%d, matched=%d/%0.0f%%, failed=%d/%0.0f%%, coverage=%0.0f%%\n",
+		total, found,
+		matched, float32(matched)/float32(found)*100.0,
+		failed, float32(failed)/float32(found)*100.0, coverage())
+}
+
+
+// test all the values in the VLC table and escape encoding
+func TestVlc4(t *testing.T) {
+	var matched, failed int
+
+	var abs = func(v int) int {
+		if (v <= 0) {
+			return -v
+		} else {
+			return v
+		}
+	}
+
+	var vlcSgn = func(s int) int {
+		if (s >= 0) {
+			return 0
+		} else {
+			return 1
+		}
+	}
+
+	var chk = func(r, l, d, r2, l2, d2 int) bool {
+		if r != r2 || l != l2 || d != d2 {
+			failed++
+			return true
+		} else {
+			matched++
+			return false
+		}
+	}
+
+	fmt.Printf("TestVlc4\n")
+	//tableLen := len(vlcs)
+
+	total := 1000000
+	found := 0
+	outer:
+	for i := 0; i < total; i++ {
+redo:
+		r := rbetween(0, 63)
+		l := rbetween(-255, 255)
+		if l == 0 {
+			goto redo
+		}
+		//r, l = 63, -128
+		//fmt.Printf("TestVlc4: r/l=%d/%d, r/l=0x%x/0x%x\n", r, l, r, l)
+		for i := range vlcs {
+			if vlcs[i].r == r && vlcs[i].l == abs(l) {
+				//fmt.Printf("found one: i=%d, r/l=%d/%d, %#v/%d, ", i, r, l, *vlcs[i].v, vlcs[i].d)
+				found++
+				vlcs[i].vlc |= covbit(l)
+				vlc := convert(vlcs[i].v, vlcs[i].d, uint32(vlcSgn(l)), false)
+				//fmt.Printf("convert vlc=0x%x\n", vlc)	
+				d := vlcs[i].d
+				j := d
+				for j < 17 {
+					vlc <<= 1
+					j++
+				}
+				r2, l2, d2, _ := XdecodeDCTCoeff(vlc, false)
+				if chk(r, l, int(d), int(r2), int(l2), int(d2)) {
+					fmt.Printf("FAIL, table: didn't match vcs=0x%x/%d, r/l=%d/%d, r2/l2=%d/%d, d/d2=%d/%d\n",
+						vlc, vlcs[i].d, r, l, r2, l2, d, d2)
+				} else {
+					//fmt.Printf("match, table: r=%d, l=%d\n", r, l)		
+				}
+				continue outer
+			}
+		}
+		// not in table construct using escape sequence
+		u, d := construct(r, l)
+		r2, l2, d2 := DecodeEscape(u)
+		if chk(r, l, int(d), int(r2), int(l2), int(d2)) {
+			fmt.Printf("FAIL, escape: didn't match r/l=%d/%d, r2/l2=%d/%d, d=%d, d2=%d\n", r, l, r2, l2, d, d2)
+		} else {
+			//fmt.Printf("match, escape: r=%d, l=%d\n", r, l)		
+		}
+		//fmt.Printf("\n")
+	}
+	fmt.Printf("total=%d, matched=%d/%0.0f%%, failed=%d/%0.0f%%, coverage=%0.0f%%\n",
+		total,
+		matched, float32(matched)/float32(total)*100.0,
+		failed, float32(failed)/float32(total)*100.0, 0.0)
+}
+
+
+// test all the values in the VLC table and escape encoding
+func TestVlc5(t *testing.T) {
+	var matched, failed int
+
+	var abs = func(v int) int {
+		if (v <= 0) {
+			return -v
+		} else {
+			return v
+		}
+	}
+
+	var vlcSgn = func(s int) int {
+		if (s >= 0) {
+			return 0
+		} else {
+			return 1
+		}
+	}
+
+	var chk = func(r, l, d, r2, l2, d2 int) bool {
+		if r != r2 || l != l2 || d != d2 {
+			failed++
+			return true
+		} else {
+			matched++
+			return false
+		}
+	}
+
+	fmt.Printf("TestVlc5\n")
+	//tableLen := len(vlcs)
+
+	total := 0
+	found := 0
+	for r := 0; r <= 63; r++ {
+inner:
+		for l := -255;  l <= 255; l++ {
+			if l == 0 {
+				continue
+			}
+			total++
+			//r, l = 63, -128
+			//fmt.Printf("TestVlc5: r/l=%d/%d, r/l=0x%x/0x%x\n", r, l, r, l)
+			for i := range vlcs {
+				if vlcs[i].r == r && vlcs[i].l == abs(l) {
+					//fmt.Printf("found one: i=%d, r/l=%d/%d, %#v/%d, ", i, r, l, *vlcs[i].v, vlcs[i].d)
+					found++
+					vlcs[i].vlc |= covbit(l)
+					vlc := convert(vlcs[i].v, vlcs[i].d, uint32(vlcSgn(l)), false)
+					//fmt.Printf("convert vlc=0x%x\n", vlc)	
+					d := vlcs[i].d
+					j := d
+					for j < 17 {
+						vlc <<= 1
+						j++
+					}
+					r2, l2, d2, _ := XdecodeDCTCoeff(vlc, false)
+					if chk(r, l, int(d), int(r2), int(l2), int(d2)) {
+						fmt.Printf("FAIL, table: didn't match vcs=0x%x/%d, r/l=%d/%d, r2/l2=%d/%d, d/d2=%d/%d\n",
+							vlc, vlcs[i].d, r, l, r2, l2, d, d2)
+					} else {
+						//fmt.Printf("match, table: r=%d, l=%d\n", r, l)		
+					}
+					continue inner
+				}
+			}
+			// not in table construct using escape sequence
+			u, d := construct(r, l)
+			r2, l2, d2 := DecodeEscape(u)
+			if chk(r, l, int(d), int(r2), int(l2), int(d2)) {
+				fmt.Printf("FAIL, escape: didn't match r/l=%d/%d, r2/l2=%d/%d, d=%d, d2=%d\n", r, l, r2, l2, d, d2)
+			} else {
+				//fmt.Printf("match, escape: r=%d, l=%d\n", r, l)		
+			}
+			//fmt.Printf("\n")
+		}
+	}
+	fmt.Printf("TestVlc5: total=%d, matched=%d/%0.0f%%, failed=%d/%0.0f%%, coverage=%0.0f%%\n",
+		total,
+		matched, float32(matched)/float32(total)*100.0,
+		failed, float32(failed)/float32(total)*100.0, 0.0)
 }
 

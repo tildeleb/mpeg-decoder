@@ -12,7 +12,7 @@ import "testing"
 var r = rand.Float64
 const maxbitlen = 32
 const nBytes = 1000000 // 500*1024*1024
-const nEntries = 1000 * 1000 /// 
+const nEntries = 10 * 1000 * 1000 /// 
 var bits []byte
 type info struct {
 	blen	uint
@@ -57,12 +57,13 @@ var tmp		uint64
 		v.value = uint32(rbetween(0, int(math.Exp2(float64(v.blen))-1)))
 
 		//fmt.Printf("value=0x%x, blen=%d\n", v.value, v.blen)
-		bitstream.Put(bits, v.value, v.blen, &tdata, &tblen, &tbitlen)
+		Put(&bits, v.value, v.blen, &tdata, &tblen, &tbitlen)
 		dist[v.blen]++
 		//fmt.Printf("k=%d, blen=%d, value=0x%x\n", k, v.blen, v.value)
 	}
 	sav = tblen
 	//fmt.Printf("tblen=%d, ", tblen)
+/*
 	for {
 		if tblen == 0 || tblen >= 8 {
 			break
@@ -70,9 +71,12 @@ var tmp		uint64
 		tdata <<= 1 // fill with zeros
 		tblen++
 	}
+*/
 	//fmt.Printf("%d bits filled\n", tblen - sav)
 	sav++
-	put(&tdata, &tblen, &tmp) // don't include fill in bitlen
+	Put(&bits, 0, 8, &tdata, &tblen, &tmp) // don't include fill in bitlen
+	Put(&bits, 0, 8, &tdata, &tblen, &tmp) // don't include fill in bitlen
+	Put(&bits, 0, 8, &tdata, &tblen, &tmp) // don't include fill in bitlen
 	return
 }
 
@@ -102,7 +106,7 @@ func TestFF(t *testing.T) {
 	fmt.Printf("TestFF\n")
 	bits = nil
 	tbits := fill_FF(nBytes)
-	bs, _ := NewFromMemory(bits)
+	bs, _ := NewFromMemory(bits, "r")
 
 	for nbits := tbits; nbits > 0; {
 		if (nbits < mbits) {
@@ -132,7 +136,7 @@ func TestRandom(t *testing.T) {
 	fmt.Printf("TestRandom\n")
 	tbits := fill_random(nEntries)
 	//dumpDist()
-	bs, _ := NewFromMemory(bits)
+	bs, _ := NewFromMemory(bits, "r")
 	for k, v := range data {
 		// fmt.Printf("value=0x%x, blen=%d\n", v.value, v.blen)
 		pvalue := bs.Peekbits(v.blen)

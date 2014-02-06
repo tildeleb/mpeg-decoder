@@ -1,16 +1,22 @@
+// converted from Qt/Nokia Decoder
+
 package iso11172	// iso111722 rename on import
 
 import "fmt"
 
-/*
-const macroblockAddressIncrement []unit16 = []unit16{
+const Next1		uint16 = 0xdead
+const Next2		uint16 = 0xbeef
+const Escape	uint16 = 0x080b
+const Stuffing	uint16 = 0x0f0b
+
+var macroblockAddressIncrement []uint16 = []uint16{
 		Next1,   Next2, 0x0705, 0x0605, 0x0504, 0x0504, 0x0404, 0x0404,
 		0x0303, 0x0303, 0x0303, 0x0303, 0x0203, 0x0203, 0x0203, 0x0203,
 		0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
-		0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+		0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
 }
 
-const macroblockAddressIncrement2 []unit16 = []unit16{
+var macroblockAddressIncrement2 []uint16 = []uint16{
 	0x0d08, 0x0d08, 0x0d08, 0x0d08, 0x0d08, 0x0d08, 0x0d08, 0x0d08,
 	0x0c08, 0x0c08, 0x0c08, 0x0c08, 0x0c08, 0x0c08, 0x0c08, 0x0c08,
 	0x0b08, 0x0b08, 0x0b08, 0x0b08, 0x0b08, 0x0b08, 0x0b08, 0x0b08,
@@ -18,10 +24,10 @@ const macroblockAddressIncrement2 []unit16 = []unit16{
 	0x0907, 0x0907, 0x0907, 0x0907, 0x0907, 0x0907, 0x0907, 0x0907,
 	0x0907, 0x0907, 0x0907, 0x0907, 0x0907, 0x0907, 0x0907, 0x0907,
 	0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807,
-	0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807
+	0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807,
 }
 
-const macroblockAddressIncrement1 []unit16 = []unit16{
+var macroblockAddressIncrement1 []uint16 = []uint16{
 	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 	Escape, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, Stuffing,
 	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
@@ -29,98 +35,97 @@ const macroblockAddressIncrement1 []unit16 = []unit16{
 	0x190b, 0x180b, 0x170b, 0x160b, 0x150a, 0x150a, 0x140a, 0x140a,
 	0x130a, 0x130a, 0x120a, 0x120a, 0x110a, 0x110a, 0x100a, 0x100a,
 	0x0f08, 0x0f08, 0x0f08, 0x0f08, 0x0f08, 0x0f08, 0x0f08, 0x0f08,
-	0x0e08, 0x0e08, 0x0e08, 0x0e08, 0x0e08, 0x0e08, 0x0e08, 0x0e08
+	0x0e08, 0x0e08, 0x0e08, 0x0e08, 0x0e08, 0x0e08, 0x0e08, 0x0e08,
 }
 
-int getMacroblockAddressIncrement(InputBitstream *input) 
-	{
-		int index = input->nextBits(11);
-		int value = s_macroblockAddressIncrement[index >> 6];
+func (ms *MpegState) GetMacroblockAddressIncrement() (ret uint32) {
 
-		if (value == Next1)
-			value = s_macroblockAddressIncrement1[index & 0x3f];
-		else if (value == Next2)
-			value = s_macroblockAddressIncrement2[index & 0x3f];
+	bits1 := ms.Peekbits(1)
+	index := ms.Peekbits(11)
+	value := macroblockAddressIncrement[index >> 6]
 
-		input->getBits(value & 0xff);
-
-		return value >> 8;
+	switch value {
+	case Next1:
+		value = macroblockAddressIncrement1[index & 0x3f]
+	case Next2:
+		value = macroblockAddressIncrement2[index & 0x3f]
+	default:
 	}
+	ms.Getbits(uint(value)&0xff)
+	ret = uint32(value>>8)
+	if ret == 0 || (ret == 1 && bits1 != 1) {
+		panic("GetMacroblockAddressIncrement")
+	}
+	return
+}
 
-const s_macroblockTypeI uint8[] = uint8[]{0x00, 0x12, 0x01, 0x01}
 
-const s_macro blockTypeP uint16[] = uint16[]{
+
+var macroblockTypeI []uint8 = []uint8{0x00, 0x12, 0x01, 0x01}
+
+var macroblockTypeP []uint16 = []uint16{
 	0x0000, 0x1106, 0x1205, 0x1205, 0x1a05, 0x1a05, 0x0105, 0x0105,
 	0x0803, 0x0803, 0x0803, 0x0803, 0x0803, 0x0803, 0x0803, 0x0803,
 	0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202,
-	0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202
+	0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202,
 }
 
-const s_macroblockTypeB uint16[] = uint16[]{
+var macroblockTypeB []uint16 = []uint16{
 	0x0000, 0x1106, 0x1606, 0x1a06, 0x1e05, 0x1e05, 0x0105, 0x0105,
 	0x0804, 0x0804, 0x0804, 0x0804, 0x0a04, 0x0a04, 0x0a04, 0x0a04,
 	0x0403, 0x0403, 0x0403, 0x0403, 0x0403, 0x0403, 0x0403, 0x0403,
-	0x0603, 0x0603, 0x0603, 0x0603, 0x0603, 0x0603, 0x0603, 0x0603
+	0x0603, 0x0603, 0x0603, 0x0603, 0x0603, 0x0603, 0x0603, 0x0603,
 }
 
-	void Vlc::getMacroblockType(int pictureType, InputBitstream *input, Vlc::MacroblockType &macroblockType) 
-	{
-		int index  = 0;
-		int value  = 0;
-		int length = 0;
-
-		switch (pictureType) 
-		{
-			case VideoPicture::PictureCodingI:
-				index  = input->nextBits(2);
-				length = s_macroblockTypeI[index] & 0x0f;
-
-				macroblockType.setMacroblockQuant((s_macroblockTypeI[index] >> 4) != 0);
-				macroblockType.setMacroblockMotionForward(false);
-				macroblockType.setMacroblockMotionBackward(false);
-				macroblockType.setMacroblockPattern(false);
-				macroblockType.setMacroblockIntra(true);
-
-				input->getBits(length);
-				break;
-
-			case VideoPicture::PictureCodingP:
-				index = input->nextBits(6);
-
-				// Handle special case: highest bit is 1
-				value  = index < 0x20? s_macroblockTypeP[index] >> 8 : 0x0a;
-				length = index < 0x20? s_macroblockTypeP[index] & 0xff : 1;
-
-				macroblockType.setMacroblockQuant((value & 0x10) != 0);
-				macroblockType.setMacroblockMotionForward((value & 0x08) != 0);
-				macroblockType.setMacroblockMotionBackward((value & 0x04) != 0);
-				macroblockType.setMacroblockPattern((value & 0x02) != 0);
-				macroblockType.setMacroblockIntra((value & 0x01) != 0);
-
-				input->getBits(length);
-				break;
-
-			case VideoPicture::PictureCodingB:
-				index = input->nextBits(6);
-
-				// Handle 2 special cases: highest bit 1
-				value  = index < 0x20? s_macroblockTypeB[index] >> 8 :	index < 0x30? 0x0c : 0x0e;
-				length = index < 0x20? s_macroblockTypeB[index] & 0xff : 2;
-
-				macroblockType.setMacroblockQuant((value & 0x10) != 0);
-				macroblockType.setMacroblockMotionForward((value & 0x08) != 0);
-				macroblockType.setMacroblockMotionBackward((value & 0x04) != 0);
-				macroblockType.setMacroblockPattern((value & 0x02) != 0);
-				macroblockType.setMacroblockIntra((value & 0x01) != 0);
-
-				input->getBits(length);
-				break;
-
-			case VideoPicture::PictureCodingD:
-				break;
+func (ms *MpegState) GetMacroblockType(pt PictureType) (in, pa, mb, mf, qf uint32) {
+	var ternary = func(c bool, a, b uint16) uint32 {
+		if (c) {
+			return uint32(a)
+		} else {
+			return uint32(b)
 		}
 	}
 
+	switch (pt) {
+	case pt_ipict:
+		index  := ms.Peekbits(2)
+		length := macroblockTypeI[index] & 0x0f
+		in, pa, mb, mf, qf = 1, 0, 0, 0, uint32(macroblockTypeI[index] >> 4)
+		ms.Getbits(uint(length))
+
+	case pt_ppict:
+		index := ms.Peekbits(6)
+
+		// Handle special case: highest bit is 1
+		value  := ternary(index < 0x20, macroblockTypeP[index] >> 8, 0x0a)
+		length := ternary(index < 0x20, macroblockTypeP[index] & 0xff, 1)
+
+		in = (value & 0x01)
+		pa = (value & 0x02)
+		mb = (value & 0x04)
+		mf = (value & 0x08)
+		qf = (value & 0x10)
+		ms.Getbits(uint(length))
+	case pt_bpict:
+		index := ms.Peekbits(6)
+
+		// Handle 2 special cases: highest bit 1
+		value  := ternary(index < 0x20, macroblockTypeB[index] >> 8, uint16(ternary(index < 0x30, 0x0c, 0x0e)))
+		length := ternary(index < 0x20, macroblockTypeB[index] & 0xff, 2)
+
+		in = (value & 0x01)
+		pa = (value & 0x02)
+		mb = (value & 0x04)
+		mf = (value & 0x08)
+		qf = (value & 0x10)
+		ms.Getbits(uint(length))
+	case pt_dpict:
+		panic("pt_dpict")
+	}
+	return
+}
+
+/*
 const s_motionVector []uint32 = []uint32{
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
@@ -264,63 +269,71 @@ const s_codedBlockPattern []uint16 = []uint16{
 
 		return value;
 	}
-
-	const short Vlc::s_dctDcSizeLuminance[] = 
-	{
-		0x12, 0x12, 0x12, 0x12, 0x22, 0x22, 0x22, 0x22,
-		0x03, 0x03, 0x33, 0x33, 0x43, 0x43, 0x54, 0x00
-	};
-
-	const short Vlc::s_dctDcSizeLuminance1[] = 
-	{
-		0x65, 0x65, 0x65, 0x65, 0x76, 0x76, 0x87, 0x00
-	}; 
-
-	int Vlc::decodeDCTDCSizeLuminance(InputBitstream *input)
-	{
-		int index = input->nextBits(7);
-		int value = s_dctDcSizeLuminance[index >> 3];
-
-		if (value == 0)
-			value = s_dctDcSizeLuminance1[index & 0x07];
-
-		input->getBits(value & 0xf);
-
-		return value >> 4;
-	}
-
-	const short Vlc::s_dctDcSizeChrominance[] =
-	{
-		0x02, 0x02, 0x02, 0x02, 0x12, 0x12, 0x12, 0x12,
-		0x22, 0x22, 0x22, 0x22, 0x33, 0x33, 0x44, 0x00
-	};
-
-	const short Vlc::s_dctDcSizeChrominance1[] =
-	{
-		0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
-		0x66, 0x66, 0x66, 0x66, 0x77, 0x77, 0x88, 0x00
-	};
-
-	int Vlc::decodeDCTDCSizeChrominance(InputBitstream *input)
-	{
-		int index = input->nextBits(8);
-		int value = s_dctDcSizeChrominance[index >> 4];
-
-		if (value == 0)
-			value = s_dctDcSizeChrominance1[index & 0xf];
-
-		input->getBits(value & 0xf);
-
-		return value >> 4;
-	}
 */
-	// Decoding tables for dct_coeff_first & dct_coeff_next
-	// 
-	// This were originally 15 arrays. Now they are merged to form a single array,
-	// and using a scale to retrieve data from the correct array of coefficients.
-	//
-	// Total number of entries 16 * 32 = 512
-	// First 32 entries are not used in fact
+
+
+var dctDcSizeLuminance []uint16 = []uint16{
+	0x12, 0x12, 0x12, 0x12, 0x22, 0x22, 0x22, 0x22,
+	0x03, 0x03, 0x33, 0x33, 0x43, 0x43, 0x54, 0x00,
+}
+
+var dctDcSizeLuminance1 []uint16 = []uint16{
+	0x65, 0x65, 0x65, 0x65, 0x76, 0x76, 0x87, 0x00,
+}
+
+func (ms *MpegState) DecodeDCTDCSizeLuminance() int32 {
+	index := ms.Peekbits(7)
+	value := dctDcSizeLuminance[index >> 3]
+	if value == 0 {
+		value = dctDcSizeLuminance1[index & 0x07]
+	}
+	ms.Getbits(uint(value) & 0xf)
+	return int32(value) >> 4
+}
+
+var dctDcSizeChrominance []uint16 = []uint16{
+	0x02, 0x02, 0x02, 0x02, 0x12, 0x12, 0x12, 0x12,
+	0x22, 0x22, 0x22, 0x22, 0x33, 0x33, 0x44, 0x00,
+}
+
+var dctDcSizeChrominance1 []uint16 = []uint16{
+	0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
+	0x66, 0x66, 0x66, 0x66, 0x77, 0x77, 0x88, 0x00,
+}
+
+func (ms *MpegState) DecodeDCTDCSizeChrominance() int32 {
+	index := ms.Peekbits(8);
+	value := dctDcSizeChrominance[index >> 4]
+	if value == 0 {
+		value = dctDcSizeChrominance1[index & 0xf]
+	}
+	ms.Getbits(uint(value) & 0xf)
+	return int32(value) >> 4;
+}
+
+/*
+func (ms *MpegState) ReadDCDC2(size int32) (ret int32) {
+	ret = 0
+	if size != 0 {
+		dcdiff := ms.Getbits(size)
+		if ((dcdiff & (1 << (uint32(size) - 1))) != 0) {
+			ret = dcdiff
+		} else {
+			ret = ((-1 << uint32(size)) | (dcdiff + 1))
+		}
+	}
+	return
+}
+*/
+
+
+// Decoding tables for dct_coeff_first & dct_coeff_next
+// 
+// This were originally 15 arrays. Now they are merged to form a single array,
+// and using a scale to retrieve data from the correct array of coefficients.
+//
+// Total number of entries 16 * 32 = 512
+// First 32 entries are not used in fact
 
 var dctCoefficients [][3]int8 = [][3]int8{
 	// 0000 0000 0000 xxxx x
@@ -513,11 +526,7 @@ var dctCoefficients4 [][3]int8 = [][3]int8{
 }
 
 
-func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
-	var r		int8 // run
-	var	l		int8 // level
-	var d		int8 // discard bits
-	var escape	bool
+func XdecodeDCTCoeff(value uint32, first bool) (r, l, d int8, escape bool) {
 	var ternary = func(c bool, a, b int8) int8 {
 		if (c) {
 			return a
@@ -526,7 +535,6 @@ func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
 		}
 	}
 
-	value := ms.Peekbits(17)
 	index := (value >> 5) & 0xfff
 	//fmt.Printf("vlc.decodeDCTCoeff: value=0x%x, index=%d, first=%v\n", value, index, first)
 	switch {
@@ -596,22 +604,79 @@ func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
 		case index >= 0xe && index <= 0xf:
 			r, l, d  = 0, -1, 3
 		default:
+			fmt.Printf("vlc.decodeDCTCoeff: index=0x%x\n", index)
 			panic("bad")
 		}
 	}
-	tmp := ms.Getbits(uint(d))
+	return
+}
+
+// 28 bits of peekahead (inlcude escape)
+// 6 (esc) + 6 (run) + 8 (level)
+// 6 (esc) + 6 (run) + 8 (marker) + 8 (value)
+func DecodeEscape(value uint32) (r, l, d int16) {
+	var shift uint32
+
+	//fmt.Printf("DecodeEscape: value=0x%x\n", value)
+	switch {
+	case (value>>22)&0x3F == 1:
+		shift = 16
+	case (value>>14)&0x3F == 1:
+		shift = 8
+		break
+	default:
+		panic("DecodeEscape: no escape from new york")
+	}
+	r = int16((value>>shift)&0x3F) // 6 bits
+	bits8 := (value>>(shift-8))&0xFF
+	//fmt.Printf("DecodeEscape: value=0x%x, bits8=0x%x, bits8=%d\n", value, bits8, int8(bits8))
+	switch bits8 {
+	case 0:
+		fmt.Printf("PE")
+		l = int16(value&0xFF)
+		d = 28
+	case 0x80:
+		fmt.Printf("NE")
+		u := uint32(value&0xFF)
+		//fmt.Printf("u=%d, u=0x%x, u=%d\n", u, u, int8(u))
+		u = ^u // ^u
+		//fmt.Printf("u=%d, u=0x%x, u=%d\n", u, u, int32(u))
+		u++
+		//fmt.Printf("u=%d, u=0x%x, u=%d\n", u&0xFF, u&0xFF, int32(u&0xFF))
+		l = -int16(u&0xFF)
+		//fmt.Printf("l=%d, l=0x%x\n", l, l)
+		d = 28
+	default:
+		fmt.Printf("E")	
+		l = int16(int8(bits8)) // workds?
+		d = 20
+	}
+	//fmt.Printf("decodeEscape: value=0x%x, r=%d, l=%d, d=%d\n", value, r, l, d)
+	return
+}
+
+func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
+	value := ms.Peekbits(17)
+	tmp := value // just to create it
+	r, l, d, escape := XdecodeDCTCoeff(value, first)
+	if (d != 0 && !escape) {
+		tmp = ms.Getbits(uint(d))
+	}
 	//fmt.Printf("vlc.decodeDCTCoeff: r=%d, l=%d, 0x%x/d=%d, escape=%v\n", r, l, tmp, d, escape)
-	run = int(r)
-	level = int(l)
 	if (escape) {
-		r := ms.Getbits(6)
-		run = int(r)
-		u := ms.Peekbits(8)
-		if (u == 0 || u == 0x80) {
-			level = int(ms.Rs())
-		} else {
-			level = int(ms.Rc())
+		// peek 6 + 8 or 6 + 16 = 22 bit ahead
+		p := ms.Peekbits(28)
+		r, l, d := DecodeEscape(p)
+		if (d != 28 && d != 20) {
+			fmt.Printf("d=%d\n", d)
+			panic("DecodeDCTCoeff: bad escape")
 		}
+		tmp = ms.Getbits(uint(d))
+		run = int(r)
+		level = int(l)
+	} else {
+		run = int(r)
+		level = int(l)
 	}
 	tmp++ // hack
 	//fmt.Printf("vlc.decodeDCTCoeff: run=%d, level=%d\n", run, level)

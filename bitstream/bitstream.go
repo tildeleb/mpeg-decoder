@@ -154,6 +154,7 @@ func NewFromMemory(b []byte, mode string) (*Bitstream, error) {
 // It returns the number of bytes read.
 // EOF is signaled by a zero count with err set to io.EOF.
 func (m *Memory) Read(b []byte) (n int, err error) {
+	var dbg bool = false
 	if m == nil {
  		return 0, os.ErrInvalid
 	}
@@ -168,8 +169,17 @@ func (m *Memory) Read(b []byte) (n int, err error) {
     	n = len(b)
     }
 //	fmt.Printf("Memory.Read: B len(m.buf)=%d, cap(m.buf)=%d\n", len(m.buf), cap(m.buf))
+	if (dbg) {
+		fmt.Printf("|")
+	}
 	for i := 0; i < n; i++ {
 		b[i] = m.buf[i]
+		if (dbg) {
+			fmt.Printf("%d, ", b[i])
+		}
+	}
+	if (dbg) {
+		fmt.Printf("|")
 	}
 //    b = m.buf[0:n]
     m.buf = m.buf[n:]
@@ -200,7 +210,12 @@ func (m *Memory) Write(b []byte) (n int, err error) {
         return n, nil
 }
 
+func (bs *Bitstream) PrintState(msg string) {
+	fmt.Printf("%s[bs.bufc=0x%08x, bs.bits=%d, bs.bufn=0x%08x, bs.nbits=%d]", msg, bs.bufc, bs.bits, bs.bufn, bs.nbits);
+}
+
 func (bs *Bitstream) readbits() error {
+	var dbg bool = false
 	//fmt.Printf("bitstream.readbits: Read()\n")
 	if bs.eof {
 		return io.EOF
@@ -210,6 +225,9 @@ func (bs *Bitstream) readbits() error {
 	//fmt.Printf("bitstream.readbits: Read() 2\n")
 
 	cnt := 4
+	if dbg {
+		fmt.Printf(" «")
+	}
 	for {
 		if len(bs.bp) == 0 {
 			bs.bp = bs.buf[0:cap(bs.buf)]
@@ -230,6 +248,12 @@ func (bs *Bitstream) readbits() error {
 		}
 
 		//fmt.Printf("bitstream.readbits: bs.bp[0]=0x%02x\n", bs.bp[0])
+		if dbg && cnt < 4 {
+			fmt.Printf(", ")
+		}
+		if dbg {
+			fmt.Printf("0x%x", bs.bp[0])
+		}
 		bs.bufn <<= 8
 		bs.bufn |= uint32(bs.bp[0])
 		bs.bp = bs.bp[1:]
@@ -239,6 +263,9 @@ func (bs *Bitstream) readbits() error {
 		if cnt == 0 {
 			break
 		}
+	}
+	if dbg {
+		fmt.Printf("» ")
 	}
 //	printf("sp->strm_nbits=%ld, strm_bufn=0x%08lx\n", sp->strm_nbits, sp->strm_bufn);
 	return nil
@@ -348,10 +375,12 @@ func (bs *Bitstream) Getbits(bits uint) uint32 {
 }
 
 func (bs *Bitstream) GetByteAligned() error {
+	cnt := 0
 	for (bs.rbits&0x7) != 0 {
 		bs.Rub()
+		cnt++
 	}
-	fmt.Printf("GetByteAligned: tbits=0x%x\n", bs.rbits)
+	fmt.Printf("GetByteAligned: read pad=%d bits, tbits=0x%x\n", cnt, bs.rbits)
 	return nil
 }
 
@@ -403,7 +432,7 @@ func (bs *Bitstream) Rc() byte {
 		// panic("EOF")
 	}
 	ret = ret&0xFF
-	fmt.Printf("bitstream.ruc ret=0x%02x\n", ret)
+	//fmt.Printf("bitstream.ruc ret=0x%02x\n", ret)
 	return byte(ret)
 }
 
@@ -446,6 +475,19 @@ func (bs *Bitstream) Rub() bool {
 		return false
 	}
 }
+
+// peek bit or bool
+func (bs *Bitstream) Pub() bool {
+
+	ret, _ := bs.peekbits2(1)
+	ret = ret&0x1
+	if ret == 1 {
+		return true
+	} else {
+		return false
+	}
+}
+
 
 // read unsigned long sub
 func (bs *Bitstream) Ruls(bits uint) uint32 {

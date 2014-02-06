@@ -5,7 +5,7 @@ package iso11172_test
 import . "leb/mpeg-decoder/bitstream"
 import . "leb/mpeg-decoder/iso11172"
 //import "flag"
-//import "fmt"
+import "fmt"
 import "testing"
 
 var mpeg1Stream []byte = []byte{
@@ -14,9 +14,10 @@ var mpeg1Stream []byte = []byte{
 0x00, 0x00, 0x0F, 0xFF, 0xF8, 0x00, 0x00, 0x01, 0x01, 0xFA, 0x96,
 0x52, 0x94, 0x88, 0xAA, 0x25, 0x29, 0x48, 0x88, 0x00, 0x00, 0x01, 0xB7}
 
-func Test(t *testing.T) {
+func TestShortStream(t *testing.T) {
 var ms MpegState
 
+	fmt.Printf("TestShortStream\n")
 	bs, _ := NewFromMemory(mpeg1Stream, "r")
 	Dump(mpeg1Stream)
 	ms.Bitstream = bs
