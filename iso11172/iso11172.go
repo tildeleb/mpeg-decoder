@@ -207,22 +207,57 @@ type Block struct {
 	kind		BlockKind
 }
 
+type MpegStats struct {
+	Frames					int
+	MacroBlocks				int
+	SkippedMB				int
+	MotionVectors			int
+	MotionVectorsForward	int
+	MotionVectorsBackward	int
+	Blocks					int
+	LumaBlocks				int
+	ChromaBlocks			int
+	Iframes					int
+	Pframes					int
+	BFrames					int
+	DFrames					int
+}
+
 type MpegState struct {
 	*Bitstream
+	MpegStats
 	sh					[]*SequenceHeader
 	MacroBlockCtr		int
 	FrameCtr			int
 	ReadMacroBlocks		bool
 	PrintMacroBlocks	bool
+	PrintHeaders		bool
+	PrintVideoSlices	bool
 }
 
 var next_code	uint32
+
+func (ms *MpegState) PrintStats() {
+	fmt.Printf("Frames: %d\n", ms.Frames)
+	fmt.Printf("MacroBlocks: %d\n", ms.MacroBlocks)
+	fmt.Printf("SkippedMB: %d\n", ms.SkippedMB)
+	fmt.Printf("MotionVectors: %d\n", ms.MotionVectors)
+	fmt.Printf("MotionVectorsForward: %d\n", ms.MotionVectorsForward)
+	fmt.Printf("MotionVectorsBackward: %d\n", ms.MotionVectorsBackward)
+	fmt.Printf("Blocks: %d\n", ms.Blocks)
+	fmt.Printf("LumaBlocks: %d\n", ms.LumaBlocks)
+	fmt.Printf("ChromaBlocks: %d\n", ms.ChromaBlocks)
+	fmt.Printf("Iframes: %d\n", ms.Iframes)
+	fmt.Printf("Pframes: %d\n", ms.Pframes)
+	fmt.Printf("BFrames: %d\n", ms.BFrames)
+	fmt.Printf("DFrames: %d\n", ms.DFrames)
+}
 
 func (ms *MpegState) ReadSeqenceHeader() *SequenceHeader {
 var sh			SequenceHeader
 
 //	b |= rul(sp, &shp->sh_code);
-	fmt.Printf("bitstream.ReadSeqenceHeader: start\n")
+	//fmt.Printf("bitstream.ReadSeqenceHeader: start\n")
 	sh.sh_code = SEQ_HEADER_CODE
 	sh.sh_hor_size = ms.Russ(12)
 	sh.sh_ver_size = ms.Russ(12)
@@ -246,7 +281,7 @@ var sh			SequenceHeader
 	sh.sh_niqmp = new(Block)
 	sh.sh_extp = nil
 	sh.sh_udp = nil
-	fmt.Printf("bitstream.ReadSeqenceHeader: end\n")
+	//fmt.Printf("bitstream.ReadSeqenceHeader: end\n")
 	if sh.sh_marker_bit != true {
 		panic("bitstream.ReadSeqenceHeader")
 	}
@@ -257,7 +292,7 @@ var sh			SequenceHeader
 func (ms *MpegState) ReadGroupHeader() *GroupHeader {
 var gh			GroupHeader
 
-	fmt.Printf("bitstream.ReadGroupHeader\n")
+	//fmt.Printf("bitstream.ReadGroupHeader\n")
 //	b |= rul(sp, &shp->sh_code);
 	gh.gh_code = GROUP_START_CODE;
 	gh.gh_drop_frame_flag = ms.Rub()
@@ -1142,6 +1177,8 @@ func (ms *MpegState) ReadMotionVectors(ph *PictureHeader, mbh *MacroBlockHeader)
 
 	// read motion vectors if present
 	if mbh.mbt_mf {
+		ms.MotionVectors++
+		ms.MotionVectorsForward++
 		//panic("iso.ReadMacroBlocks: can't parse mf")
 		mv[mfhp] = gmv(ms)
 		//fmt.Printf("iso.ReadMacroBlocks: mfhp=%d\n", mv[mfhp])
@@ -1161,6 +1198,8 @@ func (ms *MpegState) ReadMotionVectors(ph *PictureHeader, mbh *MacroBlockHeader)
 		}
 	}		
 	if mbh.mbt_mb {
+		ms.MotionVectors++
+		ms.MotionVectorsBackward++
 		//panic("iso.ReadMacroBlocks: can't parse mb")
 		mv[mbhp] = gmv(ms)
 		if ph.ph_back_code != 1 {
@@ -1187,6 +1226,7 @@ func (ms *MpegState) ReadMotionVectors(ph *PictureHeader, mbh *MacroBlockHeader)
 func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, mv *MotionVectors, i int) *Block {
 	var blk Block
 
+	ms.Blocks++
 	cnt := 0
 	fill := func(run int) {
 		if run > 0 {
@@ -1263,6 +1303,12 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, mv *MotionVectors, i int) 
 		}
 		cnt++
 	}
+	switch i {
+	case 0, 1, 2, 3:
+			ms.LumaBlocks++
+	case 4, 5:
+			ms.ChromaBlocks++
+	}
 	if ms.Peekbits(2) != EOB {
 		//for cnt := 0; ms.Peekbits(2) != EOB; {
 		for ms.Peekbits(2) != EOB {
@@ -1309,7 +1355,6 @@ var mbh		MacroBlockHeader
 var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement // ReadMBAI
 
 	//fmt.Printf("iso.ReadMacroBlocks")
-
 	//fmt.Printf("ReadMacroBlock: ms.MacroBlockCtr=%d\n", ms.MacroBlockCtr)
 
 	if ph.ph_picture_type != pt_ipict && ph.ph_picture_type != pt_ppict && ph.ph_picture_type != pt_bpict {
@@ -1357,10 +1402,16 @@ var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement /
 			if ms.PrintMacroBlocks {
 				fmt.Printf("skipped macro block %d\n", ms.MacroBlockCtr + int(i))
 			}
+			ms.MacroBlocks++
+			ms.SkippedMB++
+		}
+		if ms.PrintMacroBlocks {
+			fmt.Printf("\n")
 		}
 	}
 	ms.MacroBlockCtr += int(mbai)
 	mbh.mbt_ai = uint32(ms.MacroBlockCtr)
+	ms.MacroBlocks++
 	if ms.PrintMacroBlocks {
 		fmt.Printf("iso.ReadMacroBlock: MBAI=%d, pt=%s, Frame=%d, MacroBlock=%d\n", mbai, pt_str[ph.ph_picture_type], ms.FrameCtr, ms.MacroBlockCtr)
 	}
@@ -1385,7 +1436,9 @@ var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement /
 
 	if mbh.mbt_qf {
 		mbh.mbt_qs = ms.Russ(5)
-		fmt.Printf("iso.ReadMacroBlock: q=%d\n", mbh.mbt_qs)
+		if ms.PrintMacroBlocks {
+			fmt.Printf("iso.ReadMacroBlock: q=%d\n", mbh.mbt_qs)
+		}
 		if mbh.mbt_qs == 0 {
 			panic("mbt_qs == 0")
 		}
@@ -1425,8 +1478,7 @@ var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement /
 	return false
 }
 
-
-func (ms *MpegState) ReadMPEG1Steam(from, to int, readMacroBlocks, printMacroBlocks bool) {
+func (ms *MpegState) ReadMPEG1Steam(from, to int, readMacroBlocks, printHeaders, printVideoSlices, printMacroBlocks bool) {
 var sh				*SequenceHeader
 var gh				*GroupHeader
 var ph				*PictureHeader
@@ -1439,22 +1491,27 @@ var uc				byte
 var	scf				bool
 var	vscf			bool
 
-/*
+
 	defer func() {
 		if p := recover(); p != nil {
 			if p == "EOF" {
+				fmt.Printf("EOF: %v", p)
 				return
 			}
 			fmt.Printf("unknown error: %v", p)
 			return
 		}
 	}()
-*/
 
+// need constructor
 ms.ReadMacroBlocks = readMacroBlocks
 ms.PrintMacroBlocks = printMacroBlocks
+ms.PrintHeaders = printHeaders
+ms.PrintVideoSlices = printVideoSlices
 
-fmt.Printf("ReadMPEG1Steam: from=%d, to=%d, readMacroBlocks=%v, printMacroBlocks=%v\n", from, to, readMacroBlocks, printMacroBlocks)
+ms.MacroBlockCtr = -1
+
+//fmt.Printf("ReadMPEG1Steam: from=%d, to=%d, readMacroBlocks=%v, printMacroBlocks=%v\n", from, to, readMacroBlocks, printMacroBlocks)
 findstartcode:
 	for {
 		ms.GetByteAligned()
@@ -1479,34 +1536,56 @@ findstartcode:
 		}
 		//fmt.Printf("start code = 0x%X\n", start_code)
 		if (start_code == PICTURE_START_CODE || start_code > HIGHEST_SLICE_CODE) && vscf {
-			fmt.Printf("%d slices in frame %d\n", vsc, ms.FrameCtr)
+			if ms.PrintVideoSlices {
+				fmt.Printf("%d slices in frame %d\n", vsc, ms.FrameCtr)
+			}
 			vscf = false
 			ms.FrameCtr++
+			ms.Frames++
 			ms.MacroBlockCtr = -1
 		}
 		switch {
 		case start_code == SEQ_HEADER_CODE:
-			fmt.Printf("SEQ_HEADER_CODE\n")
 			sh = ms.ReadSeqenceHeader()
-			fmt.Printf("    sh_hor_size=%d, sh_ver_size=%d, sh_pel_aspect_ratio=%d, sh_picture_rate=%d, sh_bit_rate=%d\n",
-				sh.sh_hor_size, sh.sh_ver_size, sh.sh_pel_aspect_ratio, sh.sh_picture_rate, sh.sh_bit_rate)
+			if ms.PrintHeaders {
+				fmt.Printf("SEQ_HEADER_CODE\n")
+				fmt.Printf("    sh_hor_size=%d, sh_ver_size=%d, sh_pel_aspect_ratio=%d, sh_picture_rate=%d, sh_bit_rate=%d\n",
+					sh.sh_hor_size, sh.sh_ver_size, sh.sh_pel_aspect_ratio, sh.sh_picture_rate, sh.sh_bit_rate)
+			}
 		case start_code == PICTURE_START_CODE:
 			ph = ms.ReadPictureHeader()
-			fmt.Printf("\nFrame: %d\n", ms.FrameCtr)
-			fmt.Printf("PICTURE_START_CODE type=%s\n", pt_str[ph.ph_picture_type])
-			if ph.ph_picture_type == pt_ppict || ph.ph_picture_type == pt_bpict {
-				fmt.Printf("ph.ph_full_pell_forw_vec=%v, ph.ph_forw_code=%d\n",  
-					ph.ph_full_pell_forw_vec, ph.ph_forw_code)
+			if ms.PrintHeaders {
+				fmt.Printf("\nFrame: %d\n", ms.FrameCtr)
+				fmt.Printf("PICTURE_START_CODE type=%s\n", pt_str[ph.ph_picture_type])
+				fmt.Printf("    ph_temporal_ref=%d, ph_vbv_delay=%d\n", ph.ph_temporal_ref, ph.ph_vbv_delay)
 			}
-			if ph.ph_picture_type == pt_bpict {
-				fmt.Printf("ph.ph_full_pell_back_vec=%v, ph.ph_back_code=%d\n",  
-					ph.ph_full_pell_back_vec, ph.ph_back_code)
+			switch ph.ph_picture_type {
+			case pt_ipict:
+				ms.Iframes++
+			case pt_ppict:
+				ms.Pframes++
+				fallthrough	// ho ho
+			case pt_bpict:
+				if ms.PrintHeaders {
+					fmt.Printf("ph.ph_full_pell_forw_vec=%v, ph.ph_forw_code=%d\n",  
+						ph.ph_full_pell_forw_vec, ph.ph_forw_code)
+				}
+				if ph.ph_picture_type == pt_bpict {
+					ms.BFrames++
+				}
+				if ms.PrintHeaders {
+					fmt.Printf("ph.ph_full_pell_back_vec=%v, ph.ph_back_code=%d\n",  
+						ph.ph_full_pell_back_vec, ph.ph_back_code)
+				}
+			case pt_dpict:
+				ms.DFrames++
 			}
-			fmt.Printf("    ph_temporal_ref=%d, ph_vbv_delay=%d\n", ph.ph_temporal_ref, ph.ph_vbv_delay)
 		case start_code == GROUP_START_CODE:
 			gh = ms.ReadGroupHeader()
-			fmt.Printf("GROUP_START_CODE TC=%02d:%02d:%02d:%02d marker=%v, dff=%v\n",
-				gh.gh_tc_hr, gh.gh_tc_min, gh.gh_tc_sec, gh.gh_tc_pic, gh.gh_marker_bit, gh.gh_drop_frame_flag)
+			if ms.PrintHeaders {
+				fmt.Printf("GROUP_START_CODE TC=%02d:%02d:%02d:%02d marker=%v, dff=%v\n",
+					gh.gh_tc_hr, gh.gh_tc_min, gh.gh_tc_sec, gh.gh_tc_pic, gh.gh_marker_bit, gh.gh_drop_frame_flag)
+			}
 		case start_code == USER_DATA_START_CODE:
 			fmt.Printf("USER_DATA_START_CODE\n")
 			panic("USER_DATA_START_CODE")
@@ -1518,7 +1597,11 @@ findstartcode:
 		case start_code == RESERVED_CODE:
 			fmt.Printf("RESERVED_CODE\n")
 		case start_code == SEQ_END_CODE:
-			fmt.Printf("SEQ_END_CODE\n")
+			if ms.PrintHeaders {
+				fmt.Printf("SEQ_END_CODE\n")
+			}
+			return
+			break // ???
 		case start_code == ISO_11172_END_CODE:
 			fmt.Printf("ISO_11172_END_CODE\n")
 		case start_code == PACK_START_CODE:
@@ -1539,7 +1622,9 @@ findstartcode:
 				}
 			}
 			slh = ms.ReadSliceHeader(start_code)
-			fmt.Printf("VIDEO SLICE CODE 0x%X FrameCtr=%d, row start=%d\n", ul, ms.FrameCtr, (ul - 1)*16)
+			if ms.PrintVideoSlices {
+				fmt.Printf("VIDEO SLICE CODE 0x%X FrameCtr=%d, row start=%d\n", ul, ms.FrameCtr, (ul - 1)*16)
+			}
 			//ms.MacroBlockCtr = -1 // how zero without this
 /*
 			if ms.FrameCtr == 2 && start_code == LOWEST_SLICE_CODE {

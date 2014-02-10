@@ -683,9 +683,9 @@ func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
 }
 
 func init() {
-	fmt.Printf("len(dctCoefficients)=%d\n", len(dctCoefficients))
-	fmt.Printf("len(dctCoefficients1)=%d\n", len(dctCoefficients1))
-	fmt.Printf("len(dctCoefficients2)=%d\n", len(dctCoefficients2))
-	fmt.Printf("len(dctCoefficients3)=%d\n", len(dctCoefficients3))
-	fmt.Printf("len(dctCoefficients4)=%d\n", len(dctCoefficients4))
+	//fmt.Printf("len(dctCoefficients)=%d\n", len(dctCoefficients))
+	//fmt.Printf("len(dctCoefficients1)=%d\n", len(dctCoefficients1))
+	//fmt.Printf("len(dctCoefficients2)=%d\n", len(dctCoefficients2))
+	//fmt.Printf("len(dctCoefficients3)=%d\n", len(dctCoefficients3))
+	//fmt.Printf("len(dctCoefficients4)=%d\n", len(dctCoefficients4))
 }

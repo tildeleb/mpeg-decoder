@@ -97,7 +97,7 @@ func Dump(buf []byte, max ...int) {
 func NewFromFile(path string, mode string) (*Bitstream, error) {
 	var omode os.FileMode
 
-	fmt.Printf("bitstream.NewFromFile: New path=%q\n", path)
+	//fmt.Printf("bitstream.NewFromFile: New path=%q\n", path)
 	bs := Init()
 
 	switch mode {
@@ -113,7 +113,7 @@ func NewFromFile(path string, mode string) (*Bitstream, error) {
 		fmt.Printf("bitstream.NewFromFile: New Error\n")
 		return nil, err
 	}
-	fmt.Printf("bitstream.NewFromFile: New Ok\n")
+	//fmt.Printf("bitstream.NewFromFile: New Ok\n")
 
 	switch mode {
 	case "r":
