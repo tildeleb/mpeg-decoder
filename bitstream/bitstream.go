@@ -28,6 +28,7 @@ type Bitstream struct {
 	wbits			uint64		// total bits written so far
 	tbits			uint64		// total bits available
 	eof				bool		// have reached eof, no more bits to be had
+	printfill		bool
 }
 
 /*
@@ -215,7 +216,7 @@ func (bs *Bitstream) PrintState(msg string) {
 }
 
 func (bs *Bitstream) readbits() error {
-	var dbg bool = false
+	var dbg bool = false || bs.printfill
 	//fmt.Printf("bitstream.readbits: Read()\n")
 	if bs.eof {
 		return io.EOF
@@ -380,7 +381,7 @@ func (bs *Bitstream) GetByteAligned() error {
 		bs.Rub()
 		cnt++
 	}
-	fmt.Printf("GetByteAligned: read pad=%d bits, tbits=0x%x\n", cnt, bs.rbits)
+	//fmt.Printf("GetByteAligned: read pad=%d bits, tbits=0x%x\n", cnt, bs.rbits)
 	return nil
 }
 
@@ -508,15 +509,15 @@ func (bs *Bitstream) Russ(bits uint) uint16 {
 	return uint16(ret)
 }
 
-// read unsigned short sub
+// read signed short sub
 func (bs *Bitstream) Rss(bits uint) int16 {
 
 /*
 	if (bits > 16)
 		iexit("russ");
 */
-//	printf("russ: 0x%lx\n", ul&0xFFFF);
 	ret, _ := bs.getbits2(bits)
+	//fmt.Printf("Rss: ret=0x%x\n", ret&0xFFFF)
 	return int16(ret)
 }
 
@@ -575,3 +576,9 @@ func Put(bits *[]byte, value uint32, blen uint, tdata *uint64, tblen *uint64, tb
 		//fmt.Printf("put: tblen=%d, tbitlen=%d, tdata=0x%08x, mask=0x%08x\n", *tblen, *tbitlen, *tdata, mask)
 	}
 }
+
+
+func (bs *Bitstream) PrintFill(on bool) {
+	bs.printfill = on
+}
+

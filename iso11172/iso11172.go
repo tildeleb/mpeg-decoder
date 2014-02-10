@@ -15,6 +15,7 @@ package iso11172	// iso111722 rename on import
 import . "leb/mpeg-decoder/bitstream"
 
 import "fmt"
+import "runtime/debug"
 //import "flag"
 //import "os"
 //import "io"
@@ -122,8 +123,12 @@ type PictureHeader struct {
 	ph_vbv_delay			uint16
 	ph_full_pell_forw_vec	bool
 	ph_forw_code			int8
+	ph_forw_size			int8
+	ph_forw_f				int8
 	ph_full_pell_back_vec	bool
 	ph_back_code			int8
+	ph_back_size			int8
+	ph_back_f				int8
 	ph_eip_count			int
 	ph_eip					[]byte
 	ph_ext					[]byte
@@ -165,16 +170,50 @@ type MacroBlockHeader struct {
 	mbt_blocks				[6]*Block
 }
 
+type MotionVectorIndex int
+type MotionVectors [8]int16
+
+const (
+	mfhp MotionVectorIndex = iota
+	mfvp MotionVectorIndex = 1
+	mfhr MotionVectorIndex = 2
+	mfvr MotionVectorIndex = 3
+	mbhp MotionVectorIndex = 4
+	mbvp MotionVectorIndex = 5
+	mbhr MotionVectorIndex = 6
+	mbvr MotionVectorIndex = 7
+)
+
+type BSFrameNo		int
+type VDFrameNo		int
+type MacroBlockNo	int
+type SliceNo		int
+
+type BlockKind int
+const (
+	Luma BlockKind = 1
+	Cr BlockKind = iota
+	Cb BlockKind = iota
+)
 type Coef [64]int8
 
+// identify by frame, [slice], {Y,Cr,Cb}, block#
 type Block struct {
 	Coef
+	BSFrameNo
+	VDFrameNo
+	MacroBlockNo
+	SliceNo
+	kind		BlockKind
 }
 
 type MpegState struct {
 	*Bitstream
-	sh			[]*SequenceHeader
-	MacroBlockCtr	int
+	sh					[]*SequenceHeader
+	MacroBlockCtr		int
+	FrameCtr			int
+	ReadMacroBlocks		bool
+	PrintMacroBlocks	bool
 }
 
 var next_code	uint32
@@ -245,7 +284,7 @@ var	cnt			int
 var buf 		[100]byte
 var bp			[]byte = buf[:]
 
-	fmt.Printf("bitstream.getExt: ")
+	//fmt.Printf("bitstream.getExt: ")
 	for {
 		abit = ms.Pub()
 		if (abit) {
@@ -265,7 +304,7 @@ var bp			[]byte = buf[:]
 	if abit {
 		panic("getExt")
 	}
-	fmt.Printf("getExt: %d bytes\n", cnt)
+	//fmt.Printf("getExt: %d bytes\n", cnt)
 	return bp, cnt
 }
 /*
@@ -294,7 +333,7 @@ var uc			byte
 var ph			PictureHeader
 
 
-	fmt.Printf("bitstream.ReadPictureHeader\n")
+	//fmt.Printf("iso.ReadPictureHeader\n")
 //	b |= rul(sp, &shp->sh_code);
 	ph.ph_code = PICTURE_START_CODE
 	ph.ph_temporal_ref = ms.Russ(10)
@@ -303,11 +342,21 @@ var ph			PictureHeader
 	ph.ph_vbv_delay = ms.Rus()
 	if ph.ph_picture_type == pt_ppict || ph.ph_picture_type == pt_bpict {
 		ph.ph_full_pell_forw_vec= ms.Rub()
-		ph.ph_forw_code = ms.Rcs(3)
+		ph.ph_forw_code = ms.Rcs(3) // can't be zero
+		if ph.ph_forw_code == 0 {
+			panic("ReadPictureHeader ph.ph_forw_code == 0")
+		}
+		ph.ph_forw_size = ph.ph_forw_code - 1
+		ph.ph_forw_f = 1 << uint(ph.ph_forw_size)
 	}
 	if ph.ph_picture_type == pt_bpict {
 		ph.ph_full_pell_back_vec = ms.Rub()
 		ph.ph_back_code = ms.Rcs(3)
+		if ph.ph_back_code == 0 {
+			panic("ReadPictureHeader ph_back_code == 0")
+		}
+		ph.ph_back_size = ph.ph_back_code - 1
+		ph.ph_back_f = 1 << uint(ph.ph_back_size)
 	}
 	ph.ph_eip, ph.ph_eip_count = ms.getExt()
 	ph.ph_ext = nil;
@@ -323,7 +372,7 @@ func (ms *MpegState) ReadSliceHeader(code uint32) *SliceHeader {
 //var bp			[]byte = buf[:]
 var sl			SliceHeader
 	
-	fmt.Printf("bitstream.ReadSliceHeader\n")
+	//fmt.Printf("iso.ReadSliceHeader\n")
 	sl.sl_code = code;
 	sl.sl_quant_scale = ms.Rucs(5)
 	sl.sl_eip, sl.sl_eip_count = ms.getExt()
@@ -427,7 +476,9 @@ var ui32_to_bool = func(b uint32) bool {
 	}
 }
 
-	fmt.Printf("iso.SetMBT in=%d, pa=%d, mb=%d, mf=%d, qf=%d\n", in, pa, mb, mf, qf)
+	if ms.PrintMacroBlocks {
+		fmt.Printf("iso.SetMBT in=%d, pa=%d, mb=%d, mf=%d, qf=%d\n", in, pa, mb, mf, qf)
+	}
 	mbh.mbt_in = ui32_to_bool(in)
 	mbh.mbt_pa = ui32_to_bool(pa)
 	mbh.mbt_mb = ui32_to_bool(mb)
@@ -444,178 +495,123 @@ var			bits3 uint32
 var			bits2 uint32
 var			bits1 uint32
 
+	//bits6 = ms.Peekbits(6)
+	//fmt.Printf("ReadMBType: bits6=0x%x/6\n", bits6)
 	switch pt {
 	case pt_ipict:
 		bits1 = ms.Peekbits(1)
-		if (bits1 == 1) {
+		if bits1 == 1 {
 			_ = ms.Getbits(1)
 			in, pa, mb, mf, qf = 1, 0, 0, 0, 0
 			return
 		}
 		bits2 = ms.Peekbits(2)
-		if (bits2 == 1) {
+		if bits2 == 1 {
 			_ = ms.Getbits(2)
 			in, pa, mb, mf, qf = 1, 0, 0, 0, 1
 			return
 		}
-	default:
-		panic("ReadMBType: not I Pict")
-	}
-	
-	bits1 = ms.Peekbits(1)
-	if (bits1 == 1) {
-		_ = ms.Getbits(1)
-		switch (pt) {
-		case pt_ipict:
-			in, pa, mb, mf, qf = 1, 0, 0, 0, 0
-		case pt_ppict:
+		panic("ReadMBType: bad I Pict")
+	case pt_ppict:
+		bits1 = ms.Peekbits(1)
+		if bits1 == 1 {
+			_ = ms.Getbits(1)
 			in, pa, mb, mf, qf = 0, 1, 0, 1, 0
-		case pt_dpict:
-			in, pa, mb, mf, qf = 1, 0, 0, 0, 0
-		default:
-			fmt.Printf("ReadMBType: mbt.mbt_pt=%d\n", pt);
-			panic("ReadMBType: bad 1");
+			return
 		}
-		return
-	}
-	bits2 = ms.Peekbits(2)
-	switch bits2 {
-	case 1:
-		_ = ms.Getbits(2)
-		switch pt {
-		case pt_ipict:
-			in, pa, mb, mf, qf = 1, 0, 0, 0, 1
-		case pt_ppict:
+		bits2 = ms.Peekbits(2)
+		if bits2 == 1 {
+			_ = ms.Getbits(2)
 			in, pa, mb, mf, qf = 0, 1, 0, 0, 0
-		default:
-			panic("read_mb_type: bad 2");
+			return
 		}
-		return
-	case 2:
-		_ = ms.Getbits(2)
-		if pt == pt_ppict {
-			in, pa, mb, mf, qf = 0, 0, 1, 1, 0
-		} else {
-			panic("read_mb_type: bad 3")
+		bits3 = ms.Peekbits(3)
+		if bits3 == 1 {
+			_ = ms.Getbits(3)
+			in, pa, mb, mf, qf = 0, 0, 0, 1, 0
+			return
 		}
-	case 3:
-		_ = ms.Getbits(2)
-		if pt == pt_ppict {
-			in, pa, mb, mf, qf = 0, 1, 1, 1, 0
-		} else {
-			panic("read_mb_type: bad 4")
-		}
-	}
-	bits3 = ms.Peekbits(3)
-	switch(bits3) {
-	case 1:
-		_ = ms.Getbits(3)
-		switch pt {
-		case pt_ipict:
-			in, pa, mb, mf, qf = 1, 0, 0, 0, 1
-		case pt_ppict:
-			in, pa, mb, mf, qf = 0, 1, 0, 0, 0
-		default:
-			panic("read_mb_type: bad 2")
-		}
-		return
-	case 2:
-		_ = ms.Getbits(3) // ???
-		if pt == pt_ppict {
-			in, pa, mb, mf, qf = 0, 0, 1, 1, 0
-		} else {
-			panic("read_mb_type: bad 3")
-		}
-	case 3:
-		_ = ms.Getbits(3) // ???
-		if pt == pt_ppict {
-			in, pa, mb, mf, qf = 0, 1, 1, 1, 0
-		} else {
-			panic("read_mb_type: bad 4")
-		}
-	}
-	bits4 = ms.Peekbits(4)
-	switch bits4 {
-	case 0:
-		if pt == pt_ppict {	// only 1 5 bit code that starts with 0b0000
-			bits5 = ms.Peekbits(5)
-			if bits5 == 1 {
-				bits5 = ms.Getbits(5)
-				in, pa, mb, mf, qf = 0, 1, 0, 0, 1
-			}
-		}
-		bits6 = ms.Getbits(6)
-		fmt.Printf("read_mb_type: 6 bit code-0x%x\n", bits6)
-		switch(bits6) {
-		case 0x01:
-			if pt == pt_ppict {
-				in, pa, mb, mf, qf = 1, 0, 0, 0, 1
-			} else {
-				if pt == pt_bpict {
-					in, pa, mb, mf, qf = 1, 0, 0, 0, 1
-				} else {
-					panic("read_mb_type: bad 0b000001")
-				}
-			}
-		case 0x02:
-			if pt != pt_bpict {
-				panic("read_mb_type: bad 0b000010")
-				in, pa, mb, mf, qf = 0, 1, 1, 0, 1
-			} else {
-				panic("read_mb_type: 0b000010 expected pt_bpict")
-			}
-		case 0x03:
-			if pt != pt_bpict {
-				panic("read_mb_type: bad 0b000011")
-				in, pa, mb, mf, qf = 0, 1, 0, 1, 1
-			} else {
-				panic("read_mb_type: 0b000011 expected pt_bpict")
-			}
-		default:
-			fmt.Printf("read_mb_type: 6 bit code-0x%x\n", bits6)
-			in, pa, mb, mf, qf = 0, 0, 0, 0, 0
-			// panic("read_mb_type: bad 6 bit code")
-		}
-	case 0x01:	// all 5 bits codes
-		bits5 = ms.Getbits(5)
+		bits5 = ms.Peekbits(5)
 		switch bits5 {
-		case 0x2:
-			if pt == pt_ppict {
-				in, pa, mb, mf, qf = 0, 1, 0, 1, 1
-			} else {
-				if pt == pt_bpict {
-					in, pa, mb, mf, qf = 0, 1, 1, 1, 1
-				} else {
-					panic("read_mb_type: bad 0b00010")
-				}
-			}
-		case 0x03:
-			if pt == pt_ppict {
+		case 3:
+			_ = ms.Getbits(5)
 			in, pa, mb, mf, qf = 1, 0, 0, 0, 0
-			} else {
-				if pt == pt_bpict {
-					in, pa, mb, mf, qf = 1, 0, 0, 0, 0
-				} else {
-					panic("read_mb_type: bad 0b00011")
-				}
+			return
+		case 2:
+			_ = ms.Getbits(5)
+			in, pa, mb, mf, qf = 0, 1, 0, 1, 1
+			return
+		case 1:
+			_ = ms.Getbits(5)
+			in, pa, mb, mf, qf = 0, 1, 0, 0, 1
+			return
+		case 0:
+			bits6 = ms.Peekbits(6)
+			if bits6 == 1 {
+				_ = ms.Getbits(6)
+				in, pa, mb, mf, qf = 1, 0, 0, 0, 1
+				return
 			}
+		}
+	case pt_bpict:
+		bits6 = ms.Peekbits(6)
+		switch bits6 {
+		case 1:
+			_ = ms.Getbits(6)
+			in, pa, mb, mf, qf = 1, 0, 0, 0, 1
+			return
+		case 2:
+			_ = ms.Getbits(6)
+			in, pa, mb, mf, qf = 1, 0, 1, 1, 0
+			return
+		case 3:
+			_ = ms.Getbits(6)
+			in, pa, mb, mf, qf = 0, 1, 0, 1, 1
+			return
+		case 4, 5:
+			_ = ms.Getbits(5)
+			in, pa, mb, mf, qf = 0, 1, 1, 1, 1
+			return
+		case 6, 7:
+			_ = ms.Getbits(5)
+			in, pa, mb, mf, qf = 1, 0, 0, 0, 0
+			return
 		default:
-			panic("read_mb_type: bad 5 bit code")
+			bits4 = ms.Peekbits(4)
+			//fmt.Printf("ReadMBType: bits4=0x%x/4\n", bits4)
+			switch bits4 {
+			case 3:
+				_ = ms.Getbits(4)
+				in, pa, mb, mf, qf = 0, 1, 0, 1, 0
+				return
+			case 2:
+				_ = ms.Getbits(4)
+				in, pa, mb, mf, qf = 0, 0, 0, 1, 0
+				return
+			case 6, 7:
+				_ = ms.Getbits(3)
+				in, pa, mb, mf, qf = 0, 1, 1, 0, 0
+				return
+			case 4, 5:
+				_ = ms.Getbits(3)
+				in, pa, mb, mf, qf = 0, 0, 1, 0, 0
+				return
+			case 12, 13, 14, 15:
+				_ = ms.Getbits(2)
+				in, pa, mb, mf, qf = 0, 1, 1, 1, 0
+				return
+			case 8, 9, 10, 11:
+				_ = ms.Getbits(2)
+				in, pa, mb, mf, qf = 0, 0, 1, 1, 0
+				return
+			default:
+			}
 		}
-	case 0x02:
-		bits4 = ms.Getbits(4)
-		if pt != pt_ppict {
-			panic("read_mb_type: code 0b0010 expected pt_ppict")
-		}
-		in, pa, mb, mf, qf = 0, 0, 0, 1, 0
-	case 0x03:
-		bits4 = ms.Getbits(4)
-		if pt != pt_ppict {
-			panic("read_mb_type: code 0b0010 expected pt_ppict")
-		}
-		in, pa, mb, mf, qf = 0, 1, 0, 1, 0
+	case pt_dpict:
+		in, pa, mb, mf, qf = 1, 0, 0, 0, 0
+		return
 	default:
-		panic("read_mb_type: bad 4 bit code")
+		panic("ReadMBType: not IBPD Pict")
 	}
 	return
 }
@@ -641,14 +637,15 @@ var ternary = func(c bool, a, b int16) int16 {
 		return 0
 	}
 	bits3 = ms.Peekbits(3)
-	if (bits3&0x6) == 0x010 {
+	if bits3 == 2 || bits3 == 3 {
 		_ = ms.Getbits(3)
 		return ternary((bits3&0x1) == 1, -1, 1)
+	} else {
+		panic("ReadMBMVM: bad 3 bit code")
 	}
 	bits4a = ms.Peekbits(4)
 	switch(bits4a) {
-	case 0x2:
-	case 0x3:
+	case 0x2, 0x3:
 		_ = ms.Getbits(4)
 		return ternary((bits4a&0x01) == 1, -2, 2)
 	case 0x1:
@@ -656,75 +653,40 @@ var ternary = func(c bool, a, b int16) int16 {
 		bits1 = ms.Getbits(1)
 		return ternary((bits1&0x01) == 1, -3, 3)
 	case 0x0:
-		// ???
 		_ = ms.Getbits(4)
 		bits3 = ms.Peekbits(3)
 		if (bits3&0x6) == 0x6 {
 			_ = ms.Getbits(3)
 			return ternary((bits3&0x01) == 1, -4, 4)
 		}
-		// guaranteed to have 4 bits now, this is the second set of 4 bits
+		// guaranteed to have 4 bits now, get second set of 4 bits
 		bits4b = ms.Peekbits(4)
 		switch bits4b {
-		case 0xA:
-		case 0xB:
-			return ternary((bits4b&0x01) == 1, -5, 5)
-		case 0x8:
-		case 0x9:
-			return ternary((bits4b&0x01) == 1, -6, 6)
-		case 0x6:
-		case 0x7:
-			return ternary((bits4b&0x01) == 1, -7, 7)
+		case 0x6, 0x7, 0x8, 0x9, 0xA, 0xB:
+			return []int16{7, -7, 6, -6, 5, -5}[bits4b-6]
 		case 0x5:
 			bits2 = ms.Getbits(2)
-			switch bits2 {
-			case 2:
-				return 8
-			case 3:
-				return -8
-			case 0:
-				return 9
-			case 1:
-				return -9
-			}
+			return []int16{9, -9, 8, -8}[bits2]
 		case 0x4:
-			bits1 = ms.Peekbits(1)
-			if bits1&0x01 == 1 {
-				_ = ms.Getbits(1)
-				return ternary((bits1&0x01) == 1, -10, 10)
+			bits2 = ms.Peekbits(2)
+			if bits2 == 2 || bits2 == 3 {
+				_ = ms.Getbits(2)
+				return ternary((bits2&0x01) == 1, -10, 10)
 			}
 			// guaranteed to have 3 bits now
 			bits3 = ms.Getbits(3)
 			switch bits3 {
-			case 2:
-			case 3:
+			case 2, 3:
 				return ternary((bits3&0x01) == 1, -11, 11)
-			case 0:
-			case 1:
+			case 0, 1:
 				return ternary((bits3&0x01) == 1, -12, 12)
 			default:
 				panic("read_mb_mvm: bad 3 bit code (1)");
 			}
-				panic("read_mb_mvm: bad 3 bit code (2)");
 		case 0x3:
 			// guaranteed to have 3 bits now
 			bits3 = ms.Getbits(3)
-			switch bits3 {
-			case 6:
-			case 7:			
-				return ternary((bits3&0x01) == 1, -13, 13)
-			case 4:
-			case 5:			
-				return ternary((bits3&0x01) == 1, -14, 14)
-			case 2:
-			case 3:			
-				return ternary((bits3&0x01) == 1, -15, 15)
-			case 0:
-			case 1:			
-				return ternary((bits3&0x01) == 1, -16, 16)
-			default:
-				panic("read_mb_mvm: bad 3 bit code (2)");
-			}
+			return []int16{-16, 16, -15, 15, -14, 14, -13, 13}[bits3]
 		default:
 			panic("read_mb_mvm: bad 4 bit code (2)");
 		}
@@ -736,7 +698,7 @@ var ternary = func(c bool, a, b int16) int16 {
 }
 
 
-func (ms *MpegState) SetYCbCr(mbt *MacroBlockHeader, y0, y1, y2, y3, cb, cr uint32) {
+func (ms *MpegState) SetYCbCrold(mbt *MacroBlockHeader, y0, y1, y2, y3, cb, cr uint32) {
 var ternary = func(c bool, a, b bool) bool {
 	if (c) {
 		return a
@@ -753,6 +715,27 @@ var ternary = func(c bool, a, b bool) bool {
 	mbt.mbt_blockv[5] = ternary((cr == 1), true, false)
 	//fmt.Printf("iso.SetYCbCr: y0=%v, y1=%v, y2=%v, y3=%v, cb=%v, cr=%v\n",
 		//mbt.mbt_blockv[0], mbt.mbt_blockv[1], mbt.mbt_blockv[2], mbt.mbt_blockv[3], mbt.mbt_blockv[4], mbt.mbt_blockv[5])
+}
+
+func (ms *MpegState) SetYCbCr(mbt *MacroBlockHeader, lumabits, chromabits uint32) {
+var ternary = func(c bool, a, b bool) bool {
+	if (c) {
+		return a
+	} else {
+		return b
+	}
+}
+	mbt.mbt_blockv[0] = ternary(((lumabits&0x8) != 0), true, false)
+	mbt.mbt_blockv[1] = ternary(((lumabits&0x4) != 0), true, false)
+	mbt.mbt_blockv[2] = ternary(((lumabits&0x2) != 0), true, false)
+	mbt.mbt_blockv[3] = ternary(((lumabits&0x1) != 0), true, false)
+	mbt.mbt_blockv[4] = ternary(((chromabits&0x2) != 0), true, false)
+	mbt.mbt_blockv[5] = ternary(((chromabits&0x1) != 0), true, false)
+	if ms.PrintMacroBlocks {
+		fmt.Printf("iso.SetYCbCr: y0=%v, y1=%v, y2=%v, y3=%v, cb=%v, cr=%v\n",
+			mbt.mbt_blockv[0], mbt.mbt_blockv[1], mbt.mbt_blockv[2],
+			mbt.mbt_blockv[3], mbt.mbt_blockv[4], mbt.mbt_blockv[5])
+	}
 }
 
 func (ms *MpegState) ReadYCbCr() (y0 uint32, y1 uint32, y2 uint32, y3 uint32, cb uint32, cr uint32) {
@@ -1049,7 +1032,7 @@ var		size int32
 		ret = ms.ReadDCDC(size)
 //	}
 	//fmt.Printf("iso.ReadMBDCTDCY: %d\n", ret)
-	fmt.Printf("LDC:%d", ret)
+	//fmt.Printf("LDC:%d", ret)
 	return
 }
 
@@ -1093,7 +1076,6 @@ var		size int32
 		ret = ms.ReadDCDC(size)
 //	}
 	//fmt.Printf("iso.ReadMBDCTDCC: %d\n", ret)
-	fmt.Printf("CDC:%d", ret)
 	return
 }
 
@@ -1154,24 +1136,93 @@ func mbt_init(mbt *MacroBlockHeader, pt PictureType) {
             }
 */
 
+func (ms *MpegState) ReadMotionVectors(ph *PictureHeader, mbh *MacroBlockHeader) (*MotionVectors) {
+	var gmv func(*MpegState) int16 = (*MpegState).GetMotionVector // ReadMBMVM
+	var mv MotionVectors
 
-func (ms *MpegState) ReadMotionVectors(mbh *MacroBlockHeader, i int) {
-
+	// read motion vectors if present
+	if mbh.mbt_mf {
+		//panic("iso.ReadMacroBlocks: can't parse mf")
+		mv[mfhp] = gmv(ms)
+		//fmt.Printf("iso.ReadMacroBlocks: mfhp=%d\n", mv[mfhp])
+		if ph.ph_forw_code != 1 {
+			if mv[mfhp] != 0 && ph.ph_forw_code > 1 {
+				mv[mfhr] = ms.Rss(uint(ph.ph_forw_code - 1))
+				//fmt.Printf("iso.ReadMacroBlocks: mfhr=%d\n", mv[mfhr])
+			}
+		}
+		mv[mfvp] = gmv(ms)
+		//fmt.Printf("iso.ReadMacroBlocks: mfvp=%d\n", mv[mfvp])
+		if (ph.ph_forw_code != 1) {
+			if (mv[mfvp] != 0 && ph.ph_forw_code > 1) {
+				mv[mfvr] = ms.Rss(uint(ph.ph_forw_code - 1))
+				//fmt.Printf("iso.ReadMacroBlocks: mfvr=%d\n", mv[mfvr])
+			}
+		}
+	}		
+	if mbh.mbt_mb {
+		//panic("iso.ReadMacroBlocks: can't parse mb")
+		mv[mbhp] = gmv(ms)
+		if ph.ph_back_code != 1 {
+			if mv[mbhp] != 0 && ph.ph_back_code > 1 {
+				mv[mbhr] = ms.Rss(uint(ph.ph_back_code - 1))
+			}
+		}
+		mv[mbvp] = gmv(ms)
+		if ph.ph_back_code != 1 {
+			if mv[mbvp] != 0 && ph.ph_back_code > 1 {
+				mv[mbvr] = ms.Rss(uint(ph.ph_back_code - 1))
+			}
+		}
+	}
+	if mbh.mbt_mf || mbh.mbt_mb {
+		if ms.PrintMacroBlocks {
+			fmt.Printf("iso.ReadMotionVectors: mfhp=%d, mfhr=%d, mfvp=%d, mfvr=%d, mbhp=%d, mbhr=%d, mbvp=%d, mbvr=%d\n",
+				mv[mfhp], mv[mfhr], mv[mfvp], mv[mfvr], mv[mbhp], mv[mbhr], mv[mbvp], mv[mbvr])
+		}
+	}
+	return &mv
 }
 
-func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) {
-	var	zz Coef
+func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, mv *MotionVectors, i int) *Block {
+	var blk Block
+
+	cnt := 0
+	fill := func(run int) {
+		if run > 0 {
+			r := run
+			for ; r > 0 && cnt < 63; cnt++ { // fix 63
+				blk.Coef[cnt] = 0
+				r--
+			}
+			if (r != 0) {
+				fmt.Printf("r=%d\n", r)
+				panic("ReadBlock.fill: too many zeros")
+			}
+		}
+		return
+	}
+
 	//fmt.Printf("iso.ReadMacroBlock: i=%d\n", i)
-	mbh.mbt_blocks[i] = new(Block)
 	if mbh.mbt_in {
 		switch i {
 		case 0, 1, 2, 3:
-			zz[0] = ms.ReadMBDCTDCY()
+			blk.Coef[0] = ms.ReadMBDCTDCY()
+			if ms.PrintMacroBlocks {
+				fmt.Printf("LDC:%d", blk.Coef[0])
+			}
 		case 4:
-			zz[0] = ms.ReadMBDCTDCC()
+			blk.Coef[0] = ms.ReadMBDCTDCC()
+			if ms.PrintMacroBlocks {
+				fmt.Printf("CDC:%d", blk.Coef[0])
+			}
 		case 5:
-			zz[0] = ms.ReadMBDCTDCC()
+			blk.Coef[0] = ms.ReadMBDCTDCC()
+			if ms.PrintMacroBlocks {
+				fmt.Printf("CDC:%d", blk.Coef[0])
+			}
 		}
+		cnt++
 /*
 		if ms.MacroBlockCtr == 2 && i == 5 {
 			ms.PrintState("")
@@ -1185,7 +1236,7 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) {
 		} else {
 			pbits := ms.Peekbits(2)
 			//fmt.Printf("iso.ReadMacroBlock no EOB, bits2=0x%x\n", pbits)
-			pbits++
+			pbits+
 		}
 		ms.Getbits(2)
 */
@@ -1203,77 +1254,69 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) {
 		}
 */
 	} else {
-		panic("non intra")
+		//panic("non intra")
 		run, level := ms.DecodeDCTCoeff(true)
-		fmt.Printf(", %d/%d", run, level)
+		fill(run)
+		blk.Coef[cnt] = int8(level)
+		if ms.PrintMacroBlocks {
+			fmt.Printf("%d: %d/%d", cnt, run, level)
+		}
+		cnt++
 	}
 	if ms.Peekbits(2) != EOB {
 		//for cnt := 0; ms.Peekbits(2) != EOB; {
-		cnt := 1; 
 		for ms.Peekbits(2) != EOB {
 			run, level := ms.DecodeDCTCoeff(false)
-			r := run
-			if r > 0 {
-				for ; r > 0 && cnt < 63; cnt++ { // fix 63
-					zz[cnt] = 0
-					r--
-				}
+			fill(run)
+			if ms.PrintMacroBlocks {
+				fmt.Printf(", %d: %d/%d", cnt, run, level)
 			}
-			fmt.Printf(", %d: %d/%d", cnt, run, level)
 			if cnt > 63 {
+				debug.PrintStack()
 				panic("too many coeff")
 			}
-			zz[cnt] = int8(level)
+			blk.Coef[cnt] = int8(level)
 			cnt++
 		}
-
 		if true && ms.Getbits(2) != EOB {
 			panic("not EOB")
 		}
-
-		fmt.Printf(", EOB2\n")
+		if ms.PrintMacroBlocks {
+			fmt.Printf(", EOB2\n")
+		}
 	} else {
 		if true && ms.Getbits(2) != EOB {
 			panic("not EOB")
 		}
-		fmt.Printf(", EOB1\n")
+		if ms.PrintMacroBlocks {
+			fmt.Printf(", EOB1\n")
+		}
 	}
 /*
 	if false && ms.Getbits(2) != EOB {
 		panic("not EOB")
 	}
 */
+	return &blk
 }
 
 
 func (ms *MpegState) ReadMacroBlock(sh *SequenceHeader, gh *GroupHeader, ph *PictureHeader, sl *SliceHeader) (stop bool) {
 var bits11	uint32
-var mbh		MacroBlockHeader
-var mfhp	int16
-
-var	mfvp	int16
-
-var	mbhp	int16
-
-var	mbvp	int16
-
-var	mfhr	int16
-var	mfvr	int16
-var	mbhr	int16
-var	mbvr	int16
-
 var	stuffed	int
 var escaped int
+var mbh		MacroBlockHeader
+var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement // ReadMBAI
 
+	//fmt.Printf("iso.ReadMacroBlocks")
 
-//	fmt.Printf("bitstream.ReadMacroBlocks")
+	//fmt.Printf("ReadMacroBlock: ms.MacroBlockCtr=%d\n", ms.MacroBlockCtr)
 
-	if ph.ph_picture_type != pt_ipict {
-		panic("iso.ReadMacroBlocks: can't parse anything but I")
+	if ph.ph_picture_type != pt_ipict && ph.ph_picture_type != pt_ppict && ph.ph_picture_type != pt_bpict {
+		panic("iso.ReadMacroBlock: can't parse anything but IPB")
 	}
 
 	mbt_init(&mbh, ph.ph_picture_type)
-
 	for {
 		bits11 = ms.Peekbits(11) // check for macro block stuffing
 		if bits11 == 0xF {
@@ -1284,7 +1327,7 @@ var escaped int
 		}
 	}
 	if stuffed != 0 {
-		fmt.Printf("ReadMacroBlocks: %d stuffed\n", stuffed)
+		fmt.Printf("ReadMacroBlock: %d stuffed\n", stuffed)
 		stuffed = 0
 	}
 	
@@ -1299,87 +1342,69 @@ var escaped int
 		}
 	}
 	if escaped != 0 {
-		fmt.Printf("ReadMacroBlocks: %d escaped\n", escaped)
+		fmt.Printf("ReadMacroBlock: %d escaped\n", escaped)
 		escaped = 0
 	}
 
-	// get address increment
+	// get macro block address increment
 	//ms.PrintState("")
-	if true {
-		mbh.mbt_ai += ms.GetMacroblockAddressIncrement()
-	} else {
-		mbh.mbt_ai += ms.ReadMBAI()	
+
+	mbai := gmbai(ms)
+	//fmt.Printf("MBAI=%d, pt=%s\n", mbai, pt_str[ph.ph_picture_type])
+	if mbai > 1 {
+		// generate skipped macblocks
+		for i := uint32(1); i < mbai; i++ {
+			if ms.PrintMacroBlocks {
+				fmt.Printf("skipped macro block %d\n", ms.MacroBlockCtr + int(i))
+			}
+		}
 	}
-	fmt.Printf("MBAI=%d, pt=%s\n", mbh.mbt_ai, pt_str[ph.ph_picture_type])
+	ms.MacroBlockCtr += int(mbai)
+	mbh.mbt_ai = uint32(ms.MacroBlockCtr)
+	if ms.PrintMacroBlocks {
+		fmt.Printf("iso.ReadMacroBlock: MBAI=%d, pt=%s, Frame=%d, MacroBlock=%d\n", mbai, pt_str[ph.ph_picture_type], ms.FrameCtr, ms.MacroBlockCtr)
+	}
+/*
 	if mbh.mbt_ai != 1 {
 		//ms.PrintState("")
 		panic("MBAI != 1")
 	}
-	//in, pa, mb, mf, qf := ms.ReadMBType(ph.ph_picture_type)
-	in, pa, mb, mf, qf := ms.GetMacroblockType(ph.ph_picture_type)
+*/
+	in, pa, mb, mf, qf := ms.ReadMBType(ph.ph_picture_type)
+	//in, pa, mb, mf, qf := ms.GetMacroblockType(ph.ph_picture_type)
 
 	if in == 0 && pa == 0 && mb == 0 && mf == 0 && qf ==0 {
-		panic("iso.ReadMacroBlocks: bad GetMacroblockType")
+		panic("iso.ReadMacroBlock: bad GetMacroblockType")
 	}
-
+/*
 	if in == 0 {
 		panic("iso.ReadMacroBlocks: can't parse anything but in")
 	}
+*/
 	ms.SetMBT(&mbh, in, pa, mb, mf, qf)
 
 	if mbh.mbt_qf {
 		mbh.mbt_qs = ms.Russ(5)
-		fmt.Printf("iso.ReadMacroBlocks: q=%d\n", mbh.mbt_qs)
+		fmt.Printf("iso.ReadMacroBlock: q=%d\n", mbh.mbt_qs)
 		if mbh.mbt_qs == 0 {
 			panic("mbt_qs == 0")
 		}
 	}
-	// read motion vectors if present
-	if mbh.mbt_mf {
-		panic("iso.ReadMacroBlocks: can't parse mf")
-		mfhp = ms.ReadMBMVM()
-		if ph.ph_forw_code != 1 {
-			if mfhp != 0 && ph.ph_forw_code > 1 {
-				mfhr = ms.Rss(uint(ph.ph_forw_code - 1))
-			}
-		}
-		mfvp = ms.ReadMBMVM()
-		if (ph.ph_forw_code != 1) {
-			if (mfvp != 0 && ph.ph_forw_code > 1) {
-				mfvr = ms.Rss(uint(ph.ph_forw_code - 1))
-			}
-		}
-	}		
-	if mbh.mbt_mb {
-		panic("iso.ReadMacroBlocks: can't parse mb")
-		mbhp = ms.ReadMBMVM()
-		if ph.ph_back_code != 1 {
-			if mbhp != 0 && ph.ph_back_code > 1 {
-				mbhr = ms.Rss(uint(ph.ph_back_code - 1))
-			}
-		}
-		mbvp = ms.ReadMBMVM()
-		if ph.ph_back_code != 1 {
-			if mbvp != 0 && ph.ph_back_code > 1 {
-				mbvr = ms.Rss(uint(ph.ph_back_code - 1))
-			}
-		}
-	}
-	mfhr++
-	mfvr++
-	mbhr++
-	mbvr++
-	//fmt.Printf("iso.ReadMacroBlocks: mfhp=%d, mfhr=%d, mfvp=%d, mfvr=%d, mbhp=%d, mbhr=%d, mbvp=%d, mbvr=%d\n",
-	//	mfhp, mfhr, mfvp, mfvr, mbhp, mbhr, mbvp, mbvr)
+
+	mvp := ms.ReadMotionVectors(ph, &mbh)
+
 	if (mbh.mbt_pa) {
-		panic("iso.ReadMacroBlocks: CBP")
-		y0, y1, y2, y3, Cb, Cr := ms.ReadYCbCr()
-		ms.SetYCbCr(&mbh, y0, y1, y2, y3, Cb, Cr)
+		// panic("iso.ReadMacroBlocks: CBP")
+		lumabits, chromabits := ms.GetCodedBlockPattern()
+		ms.SetYCbCr(&mbh, lumabits, chromabits)
 	} else {
-		ms.SetYCbCr(&mbh, 1, 1, 1, 1, 1, 1)
+		if (mbh.mbt_in) {
+			ms.SetYCbCr(&mbh, 0xFF, 0xFF)
+		} else {
+			ms.SetYCbCr(&mbh, 0x00, 0x00) // ???
+		}
 	}
 
-	fmt.Printf("iso.ReadMacroBlock %d:\n", ms.MacroBlockCtr)
 	for i, v := range mbh.mbt_blockv {
 		if v {
 /*
@@ -1387,17 +1412,21 @@ var escaped int
 				ms.PrintState("")
 			}
 */
-			fmt.Printf("%d: ", i)
-			ms.ReadBlock(&mbh, i)
+
+			if ms.PrintMacroBlocks {
+				fmt.Printf("%d: ", i)
+			}
+			mbh.mbt_blocks[i] = ms.ReadBlock(&mbh, mvp, i)
 		}
 	}
-	fmt.Printf("\n")
-	ms.MacroBlockCtr++
+	if ms.PrintMacroBlocks {
+		fmt.Printf("\n")
+	}
 	return false
 }
 
 
-func (ms *MpegState) ReadMPEG1Steam() {
+func (ms *MpegState) ReadMPEG1Steam(from, to int, readMacroBlocks, printMacroBlocks bool) {
 var sh				*SequenceHeader
 var gh				*GroupHeader
 var ph				*PictureHeader
@@ -1410,6 +1439,7 @@ var uc				byte
 var	scf				bool
 var	vscf			bool
 
+/*
 	defer func() {
 		if p := recover(); p != nil {
 			if p == "EOF" {
@@ -1419,7 +1449,13 @@ var	vscf			bool
 			return
 		}
 	}()
+*/
 
+ms.ReadMacroBlocks = readMacroBlocks
+ms.PrintMacroBlocks = printMacroBlocks
+
+fmt.Printf("ReadMPEG1Steam: from=%d, to=%d, readMacroBlocks=%v, printMacroBlocks=%v\n", from, to, readMacroBlocks, printMacroBlocks)
+findstartcode:
 	for {
 		ms.GetByteAligned()
 		for {
@@ -1441,61 +1477,85 @@ var	vscf			bool
 				}
 			}
 		}
-		fmt.Printf("start code = 0x%X\n", start_code)
+		//fmt.Printf("start code = 0x%X\n", start_code)
 		if (start_code == PICTURE_START_CODE || start_code > HIGHEST_SLICE_CODE) && vscf {
-			fmt.Printf("%d slices\n", vsc)
+			fmt.Printf("%d slices in frame %d\n", vsc, ms.FrameCtr)
 			vscf = false
+			ms.FrameCtr++
+			ms.MacroBlockCtr = -1
 		}
-		switch start_code {
-		case SEQ_HEADER_CODE:
+		switch {
+		case start_code == SEQ_HEADER_CODE:
 			fmt.Printf("SEQ_HEADER_CODE\n")
 			sh = ms.ReadSeqenceHeader()
 			fmt.Printf("    sh_hor_size=%d, sh_ver_size=%d, sh_pel_aspect_ratio=%d, sh_picture_rate=%d, sh_bit_rate=%d\n",
 				sh.sh_hor_size, sh.sh_ver_size, sh.sh_pel_aspect_ratio, sh.sh_picture_rate, sh.sh_bit_rate)
-		case PICTURE_START_CODE:
+		case start_code == PICTURE_START_CODE:
 			ph = ms.ReadPictureHeader()
+			fmt.Printf("\nFrame: %d\n", ms.FrameCtr)
 			fmt.Printf("PICTURE_START_CODE type=%s\n", pt_str[ph.ph_picture_type])
+			if ph.ph_picture_type == pt_ppict || ph.ph_picture_type == pt_bpict {
+				fmt.Printf("ph.ph_full_pell_forw_vec=%v, ph.ph_forw_code=%d\n",  
+					ph.ph_full_pell_forw_vec, ph.ph_forw_code)
+			}
+			if ph.ph_picture_type == pt_bpict {
+				fmt.Printf("ph.ph_full_pell_back_vec=%v, ph.ph_back_code=%d\n",  
+					ph.ph_full_pell_back_vec, ph.ph_back_code)
+			}
 			fmt.Printf("    ph_temporal_ref=%d, ph_vbv_delay=%d\n", ph.ph_temporal_ref, ph.ph_vbv_delay)
-		case GROUP_START_CODE:
+		case start_code == GROUP_START_CODE:
 			gh = ms.ReadGroupHeader()
 			fmt.Printf("GROUP_START_CODE TC=%02d:%02d:%02d:%02d marker=%v, dff=%v\n",
 				gh.gh_tc_hr, gh.gh_tc_min, gh.gh_tc_sec, gh.gh_tc_pic, gh.gh_marker_bit, gh.gh_drop_frame_flag)
-		case USER_DATA_START_CODE:
+		case start_code == USER_DATA_START_CODE:
 			fmt.Printf("USER_DATA_START_CODE\n")
 			panic("USER_DATA_START_CODE")
-		case SEQ_ERROR_CODE:
+		case start_code == SEQ_ERROR_CODE:
 			fmt.Printf("SEQ_ERROR_CODE\n")
-		case EXTENSION_START_CODE:
+		case start_code == EXTENSION_START_CODE:
 			fmt.Printf("EXTENSION_START_CODE\n")
 			panic("EXTENSION_START_CODE")
-		case RESERVED_CODE:
+		case start_code == RESERVED_CODE:
 			fmt.Printf("RESERVED_CODE\n")
-		case SEQ_END_CODE:
+		case start_code == SEQ_END_CODE:
 			fmt.Printf("SEQ_END_CODE\n")
-		case ISO_11172_END_CODE:
+		case start_code == ISO_11172_END_CODE:
 			fmt.Printf("ISO_11172_END_CODE\n")
-		case PACK_START_CODE:
+		case start_code == PACK_START_CODE:
 			fmt.Printf("PACK_START_CODE\n")
-		case SYSTEM_HEADER_START_CODE:
+		case start_code == SYSTEM_HEADER_START_CODE:
 			fmt.Printf("SYSTEM_HEADER_START_CODE\n")
-		default:
+		case start_code >= LOWEST_SLICE_CODE && start_code <= HIGHEST_SLICE_CODE:
 			ul = start_code&uint32(SLICE_MASK)
 			if ul == 1 {
 				vsc = 1
 				vscf = true
-			} else
+			} else {
 				if ul >= 0x02 && ul <= 0xAF {
 					vsc++
 				} else {
 					fmt.Printf("0x%x, unknown start code\n", start_code)
 					panic("main: unkown start code")
 				}
+			}
 			slh = ms.ReadSliceHeader(start_code)
-			fmt.Printf("VIDEO SLICE CODE 0x%X row start=%d\n", ul, (ul - 1)*16)
-			//continue
-
-			for { 
+			fmt.Printf("VIDEO SLICE CODE 0x%X FrameCtr=%d, row start=%d\n", ul, ms.FrameCtr, (ul - 1)*16)
+			//ms.MacroBlockCtr = -1 // how zero without this
+/*
+			if ms.FrameCtr == 2 && start_code == LOWEST_SLICE_CODE {
+				ms.PrintState("")
+				ms.PrintFill(true)
+			}
+*/
+			if !readMacroBlocks || (ms.FrameCtr < from || ms.FrameCtr > to) {
+				continue findstartcode
+			}
+			//fmt.Printf("FrameCtr=%d\n", ms.FrameCtr)
+			//os.Stdout.Sync()
+			for {
+				//fmt.Printf("MacroBlockCtr=%d\n", ms.MacroBlockCtr)
 				stop := ms.ReadMacroBlock(sh, gh, ph, slh)
+				//ms.MacroBlockCtr++
 				if stop {
 					fmt.Printf("got stop\n")
 					break
@@ -1506,6 +1566,9 @@ var	vscf			bool
 					break
 				}
 			}
+		default:
+			fmt.Printf("ReadMPEG1Steam: code=0x%x\n", start_code)
+			panic("ReadMPEG1Steam: unknown start code")
 		}
 	}
 }

@@ -54,6 +54,7 @@ func (ms *MpegState) GetMacroblockAddressIncrement() (ret uint32) {
 	ms.Getbits(uint(value)&0xff)
 	ret = uint32(value>>8)
 	if ret == 0 || (ret == 1 && bits1 != 1) {
+		fmt.Printf("GetMacroblockAddressIncrement: ret=%d, bits1=%d, index=0x%x\n", ret, bits1, index)
 		panic("GetMacroblockAddressIncrement")
 	}
 	return
@@ -95,16 +96,15 @@ func (ms *MpegState) GetMacroblockType(pt PictureType) (in, pa, mb, mf, qf uint3
 
 	case pt_ppict:
 		index := ms.Peekbits(6)
-
 		// Handle special case: highest bit is 1
 		value  := ternary(index < 0x20, macroblockTypeP[index] >> 8, 0x0a)
 		length := ternary(index < 0x20, macroblockTypeP[index] & 0xff, 1)
-
-		in = (value & 0x01)
-		pa = (value & 0x02)
-		mb = (value & 0x04)
-		mf = (value & 0x08)
-		qf = (value & 0x10)
+		fmt.Printf("GetMacroblockType: pt_ppict, bits6=0x%x, value=0x%x\n", index, value)
+		in = ternary((value&0x01) != 0, 1, 0)
+		pa = ternary((value&0x02) != 0, 1, 0)
+		mb = ternary((value&0x04) != 0, 1, 0)
+		mf = ternary((value&0x08) != 0, 1, 0)
+		qf = ternary((value&0x10) != 0, 1, 0)
 		ms.Getbits(uint(length))
 	case pt_bpict:
 		index := ms.Peekbits(6)
@@ -113,11 +113,11 @@ func (ms *MpegState) GetMacroblockType(pt PictureType) (in, pa, mb, mf, qf uint3
 		value  := ternary(index < 0x20, macroblockTypeB[index] >> 8, uint16(ternary(index < 0x30, 0x0c, 0x0e)))
 		length := ternary(index < 0x20, macroblockTypeB[index] & 0xff, 2)
 
-		in = (value & 0x01)
-		pa = (value & 0x02)
-		mb = (value & 0x04)
-		mf = (value & 0x08)
-		qf = (value & 0x10)
+		in = ternary((value & 0x01) != 0, 1, 0)
+		pa = ternary((value & 0x02) != 0, 1, 0)
+		mb = ternary((value & 0x04) != 0, 1, 0)
+		mf = ternary((value & 0x08) != 0, 1, 0)
+		qf = ternary((value & 0x10) != 0, 1, 0)
 		ms.Getbits(uint(length))
 	case pt_dpict:
 		panic("pt_dpict")
@@ -125,8 +125,8 @@ func (ms *MpegState) GetMacroblockType(pt PictureType) (in, pa, mb, mf, qf uint3
 	return
 }
 
-/*
-const s_motionVector []uint32 = []uint32{
+
+var motionVector []uint32 = []uint32{
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
@@ -145,38 +145,33 @@ const s_motionVector []uint32 = []uint32{
 	0xfffffc07, 0xfffffc07, 0xfffffc07, 0xfffffc07, 0xfffffc07, 0xfffffc07, 0xfffffc07, 0xfffffc07,
 }
 
-const s_motionVector1 []uint32 = []uint32{
+var motionVector1 []uint32 = []uint32{
 	0x00000000, 0x00000000, 0x00000305, 0xfffffd05, 0x00000204, 0x00000204, 0xfffffe04, 0xfffffe04,
 	0x00000103, 0x00000103, 0x00000103, 0x00000103, 0xffffff03, 0xffffff03, 0xffffff03, 0xffffff03,
 	0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
-	0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001
+	0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
 }
 
-	int Vlc::getMotionVector(InputBitstream *input) 
-	{
-		int index  = input->nextBits(11);
-		int value  = 0;
-		int length = 0;
+func (ms *MpegState) GetMotionVector() int16 {
+		index  := ms.Peekbits(11)
+		value := int(0)
+		length := uint(0)
 
-		if (((index >> 7) & 0xf) == 0x0) 
-		{
-			value  = s_motionVector[index] >> 0x8;
-			length = s_motionVector[index] & 0xff;
+		//fmt.Printf("GetMotionVector: index=0x%x\n", index)
+		if ((index >> 7) & 0xf) == 0x0 {
+			value  = int(motionVector[index]>>0x8)
+			length = uint(motionVector[index]&0xff)
+		} else {
+			index >>= 6
+			value  = int(motionVector1[index]>>0x8)
+			length = uint(motionVector1[index]&0xff)
 		}
-		else 
-		{
-			index >>= 6;
-
-			value  = s_motionVector1[index] >> 0x8;
-			length = s_motionVector1[index] & 0xff;
-		}
-
-		input->getBits(length);
-
-		return value;
+		//fmt.Printf("GetMotionVector: length=%d, value=%d\n", length, int16(value))
+		ms.Getbits(length)
+		return int16(value)
 	}
 
-const s_codedBlockPattern []uint16 = []uint16{
+var codedBlockPattern []uint16 = []uint16{
 	0x0000, 0x0000, 0x2709, 0x1b09, 0x3b09, 0x3709, 0x2f09, 0x1f09,
 	0x3a08, 0x3a08, 0x3608, 0x3608, 0x2e08, 0x2e08, 0x1e08, 0x1e08,
 	0x3908, 0x3908, 0x3508, 0x3508, 0x2d08, 0x2d08, 0x1d08, 0x1d08,
@@ -255,22 +250,19 @@ const s_codedBlockPattern []uint16 = []uint16{
 	0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03,
 	0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03,
 	0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03,
-	0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03
+	0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03, 0x3c03,
 }
 
-	int Vlc::getCodedBlockPattern(InputBitstream *input) 
-	{
-		int index = input->nextBits(9);
-
-		int value  = s_codedBlockPattern[index] >> 0x8;
-		int length = s_codedBlockPattern[index] & 0xff;
-
-		input->getBits(length);
-
-		return value;
-	}
-*/
-
+func (ms *MpegState) GetCodedBlockPattern() (lumabits, chromabits uint32){
+	index := ms.Peekbits(9)
+	// value := uint32(codedBlockPattern[index]>>8)
+	chromabits = uint32((codedBlockPattern[index]>>8)&0x3)
+	lumabits = uint32((codedBlockPattern[index]>>10)&0xF)
+	//fmt.Printf("GetCodedBlockPattern: value=0x%x, lumabits=0x%x, chromabits=0x%x\n", value, lumabits, chromabits)
+	length := uint(codedBlockPattern[index]&0xff)
+	ms.Getbits(length)
+	return
+}
 
 var dctDcSizeLuminance []uint16 = []uint16{
 	0x12, 0x12, 0x12, 0x12, 0x22, 0x22, 0x22, 0x22,
@@ -302,30 +294,29 @@ var dctDcSizeChrominance1 []uint16 = []uint16{
 }
 
 func (ms *MpegState) DecodeDCTDCSizeChrominance() int32 {
-	index := ms.Peekbits(8);
+	index := ms.Peekbits(8)
 	value := dctDcSizeChrominance[index >> 4]
 	if value == 0 {
 		value = dctDcSizeChrominance1[index & 0xf]
 	}
 	ms.Getbits(uint(value) & 0xf)
-	return int32(value) >> 4;
+	return int32(value) >> 4
 }
 
 /*
-func (ms *MpegState) ReadDCDC2(size int32) (ret int32) {
+func (ms *MpegState) ReadDCDC2(size uint) (ret int32) {
 	ret = 0
 	if size != 0 {
 		dcdiff := ms.Getbits(size)
 		if ((dcdiff & (1 << (uint32(size) - 1))) != 0) {
 			ret = dcdiff
 		} else {
-			ret = ((-1 << uint32(size)) | (dcdiff + 1))
+			ret = ((int32(-1) << uint32(size)) | (dcdiff + 1))
 		}
 	}
 	return
 }
 */
-
 
 // Decoding tables for dct_coeff_first & dct_coeff_next
 // 
@@ -605,6 +596,8 @@ func XdecodeDCTCoeff(value uint32, first bool) (r, l, d int8, escape bool) {
 			r, l, d  = 0, -1, 3
 		default:
 			fmt.Printf("vlc.decodeDCTCoeff: index=0x%x\n", index)
+			r, l, d = -1, -1, -1
+			return
 			panic("bad")
 		}
 	}
@@ -632,11 +625,11 @@ func DecodeEscape(value uint32) (r, l, d int16) {
 	//fmt.Printf("DecodeEscape: value=0x%x, bits8=0x%x, bits8=%d\n", value, bits8, int8(bits8))
 	switch bits8 {
 	case 0:
-		fmt.Printf("PE")
+		//fmt.Printf("PE")
 		l = int16(value&0xFF)
 		d = 28
 	case 0x80:
-		fmt.Printf("NE")
+		//fmt.Printf("NE")
 		u := uint32(value&0xFF)
 		//fmt.Printf("u=%d, u=0x%x, u=%d\n", u, u, int8(u))
 		u = ^u // ^u
@@ -647,7 +640,7 @@ func DecodeEscape(value uint32) (r, l, d int16) {
 		//fmt.Printf("l=%d, l=0x%x\n", l, l)
 		d = 28
 	default:
-		fmt.Printf("E")	
+		//fmt.Printf("E")	
 		l = int16(int8(bits8)) // workds?
 		d = 20
 	}
@@ -659,6 +652,12 @@ func (ms *MpegState) DecodeDCTCoeff(first bool) (run, level int) {
 	value := ms.Peekbits(17)
 	tmp := value // just to create it
 	r, l, d, escape := XdecodeDCTCoeff(value, first)
+	if (d < 0) {
+		fmt.Printf("DecodeDCTCoeff: first=%v, bits17=0x%x\n", first, value)
+		ms.PrintState("")
+		//panic("DecodeDCTCoeff: bad VLC")
+		return
+	}
 	if (d != 0 && !escape) {
 		tmp = ms.Getbits(uint(d))
 	}
