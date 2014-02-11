@@ -214,6 +214,7 @@ type MpegStats struct {
 	MotionVectors			int
 	MotionVectorsForward	int
 	MotionVectorsBackward	int
+	Quants					int
 	Blocks					int
 	LumaBlocks				int
 	ChromaBlocks			int
@@ -221,6 +222,7 @@ type MpegStats struct {
 	Pframes					int
 	BFrames					int
 	DFrames					int
+	CBPS					map[string]int
 }
 
 type MpegState struct {
@@ -244,6 +246,7 @@ func (ms *MpegState) PrintStats() {
 	fmt.Printf("MotionVectors: %d\n", ms.MotionVectors)
 	fmt.Printf("MotionVectorsForward: %d\n", ms.MotionVectorsForward)
 	fmt.Printf("MotionVectorsBackward: %d\n", ms.MotionVectorsBackward)
+	fmt.Printf("Quants: %d\n", ms.Quants)
 	fmt.Printf("Blocks: %d\n", ms.Blocks)
 	fmt.Printf("LumaBlocks: %d\n", ms.LumaBlocks)
 	fmt.Printf("ChromaBlocks: %d\n", ms.ChromaBlocks)
@@ -251,6 +254,10 @@ func (ms *MpegState) PrintStats() {
 	fmt.Printf("Pframes: %d\n", ms.Pframes)
 	fmt.Printf("BFrames: %d\n", ms.BFrames)
 	fmt.Printf("DFrames: %d\n", ms.DFrames)
+	fmt.Printf("CBPS:\n")
+	for k, v := range ms.CBPS {
+		fmt.Printf("   %d: %s\n", v, k)
+	}
 }
 
 func (ms *MpegState) ReadSeqenceHeader() *SequenceHeader {
@@ -773,208 +780,6 @@ var ternary = func(c bool, a, b bool) bool {
 	}
 }
 
-func (ms *MpegState) ReadYCbCr() (y0 uint32, y1 uint32, y2 uint32, y3 uint32, cb uint32, cr uint32) {
-var bits4a	uint32
-var bits4b	uint32
-var bits3	uint32
-var bits2	uint32
-var bits1	bool
-
-	// there is only one 3 bit code, all others are 4 or more
-	bits3 = ms.Peekbits(3)
-	if bits3 == 7 {
-		_ = ms.Getbits(3) 
-		y0, y1, y2, y3, cb, cr = 1, 1, 1, 1, 0, 0
-	}
-	// guaranteed to have 4 bits now
-	bits4a = ms.Getbits(4)
-	switch bits4a {
-	// pure 4 bit codes
-	case 0xD:
-		y0, y1, y2, y3, cb, cr = 0, 0, 0, 1, 0, 0
-	case 0xC:
-		y0, y1, y2, y3, cb, cr = 0, 0, 1, 0, 0, 0
-	case 0xB:
-		y0, y1, y2, y3, cb, cr = 0, 1, 0, 0, 0, 0
-	case 0xA:
-		y0, y1, y2, y3, cb, cr = 1, 0, 0, 0, 0, 0
-	// pure 5 bit codes
-	case 0x5:
-		bits1 = ms.Rub()
-		if bits1 {
-			y0, y1, y2, y3, cb, cr = 0, 0, 0, 0, 0, 1
-		} else {
-			y0, y1, y2, y3, cb, cr = 1, 1, 1, 1, 0, 1
-		}
-	case 0x4:
-		bits1 = ms.Rub()
-		if bits1 {
-			y0, y1, y2, y3, cb, cr = 0, 0, 0, 0, 1, 0
-		} else {
-			y0, y1, y2, y3, cb, cr = 1, 1, 1, 1, 1, 0
-		}
-	case 0x9:
-		bits1 = ms.Rub()
-		if bits1 {
-			y0, y1, y2, y3, cb, cr = 0, 1, 1, 0, 0, 0
-		} else {
-			y0, y1, y2, y3, cb, cr = 1, 1, 0, 0, 0, 0
-		}
-	case 0x7:
-		bits1 = ms.Rub()
-		if bits1 {
-			y0, y1, y2, y3, cb, cr = 0, 1, 1, 1, 0, 0
-		} else {
-			y0, y1, y2, y3, cb, cr = 1, 0, 1, 1, 0, 0
-		}
-	case 0x8:
-		bits1 = ms.Rub()
-		if bits1 {
-			y0, y1, y2, y3, cb, cr = 0, 1, 0, 1, 0, 0
-		} else {
-			y0, y1, y2, y3, cb, cr = 1, 0, 1, 0, 0, 0
-		}
-	case 0x6:
-		bits1 = ms.Rub()
-		if bits1 {
-			y0, y1, y2, y3, cb, cr = 1, 1, 0, 1, 0, 0
-		} else {
-			y0, y1, y2, y3, cb, cr = 1, 1, 1, 0, 0, 0
-		}
-	// 6 bit codes
-	case 0x3:
-		// guaranteed 2 bits
-		bits2 = ms.Getbits(2)
-		switch bits2 {
-		case 1:
-			y0, y1, y2, y3, cb, cr = 0, 0, 0, 0, 1, 1
-		case 3:
-			y0, y1, y2, y3, cb, cr = 0, 1, 1, 0, 0, 0
-		case 2:
-			y0, y1, y2, y3, cb, cr = 1, 0, 0, 1, 0, 0
-		case 0:
-			y0, y1, y2, y3, cb, cr = 1, 1, 1, 1, 1, 1
-		default:
-			panic("read_mb_coded_block_pattern: bad 2 bit code after 0b0011");
-		}
-	// 7 bit codes
-	case 0x2:
-		// guaranteed 3 bits
-		bits3 = ms.Getbits(3)
-		switch bits3 {
-		case 0x7:
-			y0, y1, y2, y3, cb, cr = 0, 0, 0, 1, 0, 1
-		case 0x3:
-			y0, y1, y2, y3, cb, cr = 0, 0, 0, 1, 1, 0
-		case 0x6:
-			y0, y1, y2, y3, cb, cr = 0, 0, 1, 0, 0, 1
-		case 0x2:
-			y0, y1, y2, y3, cb, cr = 0, 0, 1, 0, 1, 0
-		case 0x5:
-			y0, y1, y2, y3, cb, cr = 0, 1, 0, 0, 0, 1
-		case 0x1:
-			y0, y1, y2, y3, cb, cr = 0, 1, 0, 0, 1, 0
-		case 0x4:
-			y0, y1, y2, y3, cb, cr = 1, 0, 0, 0, 0, 1
-		case 0x0:
-			y0, y1, y2, y3, cb, cr = 1, 0, 0, 0, 1, 0
-		default:
-			panic("read_mb_coded_block_pattern: bad 3 bit code after 0b0010");
-		}
-	// 8 bit codes
-	case 0x1:
-		// guaranteed 4 bits
-		bits4b = ms.Getbits(4)
-		switch bits4b {
-		case 0xF:
-			y0, y1, y2, y3, cb, cr = 0, 0, 0, 1, 1, 1
-		case 0xE:
-			y0, y1, y2, y3, cb, cr = 0, 0, 1, 0, 1, 1
-		case 0xB:
-			y0, y1, y2, y3, cb, cr = 0, 1, 1, 0, 0, 1
-		case 0x7:
-			y0, y1, y2, y3, cb, cr = 0, 1, 1, 0, 1, 0
-		case 0x3:
-			y0, y1, y2, y3, cb, cr = 0, 1, 1, 0, 1, 1
-		case 0xD:
-			y0, y1, y2, y3, cb, cr = 0, 1, 0, 0, 1, 1
-		case 0x9:
-			y0, y1, y2, y3, cb, cr = 0, 1, 0, 1, 0, 1
-		case 0x5:
-			y0, y1, y2, y3, cb, cr = 0, 1, 0, 1, 1, 0
-		case 0x1:
-			y0, y1, y2, y3, cb, cr = 0, 1, 0, 1, 1, 1
-		case 0xC:
-			y0, y1, y2, y3, cb, cr = 1, 0, 0, 0, 0, 1
-		case 0x8:
-			y0, y1, y2, y3, cb, cr = 1, 0, 1, 0, 0, 1
-		case 0x4:
-			y0, y1, y2, y3, cb, cr = 1, 0, 1, 0, 1, 0
-		case 0x0:
-			y0, y1, y2, y3, cb, cr = 1, 0, 1, 0, 1, 1
-		case 0xA:
-			y0, y1, y2, y3, cb, cr = 1, 1, 0, 0, 0, 1
-		case 0x6:
-			y0, y1, y2, y3, cb, cr = 1, 1, 0, 0, 1, 0
-		case 0x2:
-			y0, y1, y2, y3, cb, cr = 1, 1, 0, 0, 1, 1
-		default:
-			panic("read_mb_coded_block_pattern: bad 4 bit code after 0b0001");
-		}
-	// 8-9 bits codes
-	case 0x0:
-		// at least 4 bits, sometimes 5 next
-		bits4b = ms.Getbits(4)
-		switch (bits4b) {
-		case 0xF:
-			y0, y1, y2, y3, cb, cr = 0, 1, 1, 0, 0, 1
-		case 0xD:
-			y0, y1, y2, y3, cb, cr = 0, 1, 1, 0, 1, 0
-		case 0x1:
-			bits1 = ms.Rub()
-			if bits1 {
-				y0, y1, y2, y3, cb, cr = 0, 1, 1, 0, 1, 1
-			} else {
-				y0, y1, y2, y3, cb, cr = 1, 0, 0, 1, 1, 1
-			}
-		case 0xE:
-			y0, y1, y2, y3, cb, cr = 1, 0, 0, 1, 0, 1
-		case 0xC:
-			y0, y1, y2, y3, cb, cr = 1, 0, 0, 1, 1, 0
-		case 0xA:
-			y0, y1, y2, y3, cb, cr = 1, 0, 1, 1, 0, 1
-		case 0x6:
-			y0, y1, y2, y3, cb, cr = 1, 0, 1, 1, 1, 0
-		case 0x3:
-			bits1 = ms.Rub()
-			if bits1 {
-				y0, y1, y2, y3, cb, cr = 0, 1, 1, 1, 1, 1
-			} else {
-				y0, y1, y2, y3, cb, cr = 1, 0, 1, 1, 1, 1
-			}
-		case 0x9:
-			y0, y1, y2, y3, cb, cr = 1, 1, 0, 1, 0, 1
-		case 0x5:
-			y0, y1, y2, y3, cb, cr = 1, 1, 0, 1, 1, 0
-		case 0x2:
-			bits1 = ms.Rub()
-			if bits1 {
-				y0, y1, y2, y3, cb, cr = 1, 1, 0, 1, 1, 1
-			} else {
-				y0, y1, y2, y3, cb, cr = 1, 1, 1, 0, 1, 1
-			}
-		case 0x8:
-			y0, y1, y2, y3, cb, cr = 1, 1, 1, 0, 0, 1
-		case 0x4:
-			y0, y1, y2, y3, cb, cr = 1, 1, 1, 0, 1, 0
-		default:
-			panic("read_mb_coded_block_pattern: bad 4 bit code after 0b0000")
-		}
-	default:
-		panic("read_mb_coded_block_pattern: bad 4 bit code")
-	}
-	return y0, y1, y2, y3, cb, cr
-}
 
 // read DC difference coding
 func (ms *MpegState) ReadDCDC(size int32) int8 {
@@ -1263,36 +1068,6 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, mv *MotionVectors, i int) 
 			}
 		}
 		cnt++
-/*
-		if ms.MacroBlockCtr == 2 && i == 5 {
-			ms.PrintState("")
-		}
-*/
-/*
-		if ms.Peekbits(2) == EOB {
-			_ = ms.Getbits(2)
-			fmt.Printf("EOB1\n")
-			return
-		} else {
-			pbits := ms.Peekbits(2)
-			//fmt.Printf("iso.ReadMacroBlock no EOB, bits2=0x%x\n", pbits)
-			pbits+
-		}
-		ms.Getbits(2)
-*/
-		//fmt.Printf("iso.ReadMacroBlock: getting coef\n")
-		//run, level := ms.DecodeDCTCoeff(true)
-		//fmt.Printf("iso.ReadMacroBlock: first run=%d, level=%d\n", run, level)
-		//run++
-		//level++
-/*
-		tmp := ms.Peekbits(32)
-		fmt.Printf("Peekbits(32)=0x%x\n", tmp)
-		if tmp == 0x1 {
-			fmt.Printf("EOS\n")
-			return
-		}
-*/
 	} else {
 		//panic("non intra")
 		run, level := ms.DecodeDCTCoeff(true)
@@ -1346,6 +1121,35 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, mv *MotionVectors, i int) 
 	return &blk
 }
 
+/*
+func MBString(in, pa, mb, mf, qf uint32) (ret string) {
+	var tags []string = []string{"", "in, ", "pa, ", "mb, ", "mf, ", "qf, "}
+	ret = "<"
+	ret = ret + tags[in*1]
+	ret = ret + tags[pa*2]
+	ret = ret + tags[mb*3]
+	ret = ret + tags[mf*4]
+	ret = ret + tags[qf*5]
+	if l := len(ret); l > 1 {
+		ret = ret[:l-2]
+		ret += ">"
+	}
+	return
+}
+*/
+
+func MBString(args ...uint32) (ret string) {
+	var tags []string = []string{"", "in, ", "pa, ", "mb, ", "mf, ", "qf, "}
+	ret = "<"
+	for i, v := range args {
+		ret = ret + tags[int(v)*(i+1)]
+	}
+	if l := len(ret); l > 1 {
+		ret = ret[:l-2]
+		ret += ">"
+	}
+	return
+}
 
 func (ms *MpegState) ReadMacroBlock(sh *SequenceHeader, gh *GroupHeader, ph *PictureHeader, sl *SliceHeader) (stop bool) {
 var bits11	uint32
@@ -1415,27 +1219,20 @@ var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement /
 	if ms.PrintMacroBlocks {
 		fmt.Printf("iso.ReadMacroBlock: MBAI=%d, pt=%s, Frame=%d, MacroBlock=%d\n", mbai, pt_str[ph.ph_picture_type], ms.FrameCtr, ms.MacroBlockCtr)
 	}
-/*
-	if mbh.mbt_ai != 1 {
-		//ms.PrintState("")
-		panic("MBAI != 1")
-	}
-*/
+
 	in, pa, mb, mf, qf := ms.ReadMBType(ph.ph_picture_type)
 	//in, pa, mb, mf, qf := ms.GetMacroblockType(ph.ph_picture_type)
 
 	if in == 0 && pa == 0 && mb == 0 && mf == 0 && qf ==0 {
 		panic("iso.ReadMacroBlock: bad GetMacroblockType")
 	}
-/*
-	if in == 0 {
-		panic("iso.ReadMacroBlocks: can't parse anything but in")
-	}
-*/
 	ms.SetMBT(&mbh, in, pa, mb, mf, qf)
+	//fmt.Printf("%s\n", MBString(in, pa, mb, mf, qf))
+	ms.CBPS[MBString(in, pa, mb, mf, qf)]++
 
 	if mbh.mbt_qf {
 		mbh.mbt_qs = ms.Russ(5)
+		ms.Quants++
 		if ms.PrintMacroBlocks {
 			fmt.Printf("iso.ReadMacroBlock: q=%d\n", mbh.mbt_qs)
 		}

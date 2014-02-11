@@ -20,6 +20,7 @@ var to = flag.Int("to", 9999999, "stop at frame #")
 func main() {
 	var ms iso11172.MpegState
 
+	ms.CBPS = make(map[string]int, 100)
 	flag.Parse()
 	if *vf {
 		*phdf, *pvsf, *pmbf = true, true, true
