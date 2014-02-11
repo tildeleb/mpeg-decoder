@@ -78,6 +78,7 @@ var macroblockTypeB []uint16 = []uint16{
 	0x0603, 0x0603, 0x0603, 0x0603, 0x0603, 0x0603, 0x0603, 0x0603,
 }
 
+// code seems to fail on at least pt_ppict
 func (ms *MpegState) GetMacroblockType(pt PictureType) (in, pa, mb, mf, qf uint32) {
 	var ternary = func(c bool, a, b uint16) uint32 {
 		if (c) {
@@ -96,10 +97,17 @@ func (ms *MpegState) GetMacroblockType(pt PictureType) (in, pa, mb, mf, qf uint3
 
 	case pt_ppict:
 		index := ms.Peekbits(6)
+		//fmt.Printf("GetMacroblockType: pt_ppict, bits6=0x%x\n", index)
 		// Handle special case: highest bit is 1
-		value  := ternary(index < 0x20, macroblockTypeP[index] >> 8, 0x0a)
-		length := ternary(index < 0x20, macroblockTypeP[index] & 0xff, 1)
-		fmt.Printf("GetMacroblockType: pt_ppict, bits6=0x%x, value=0x%x\n", index, value)
+		value, length := uint16(0), uint16(0)
+		if index < 0x20 {
+			value = macroblockTypeP[index] >> 8
+			length = macroblockTypeP[index] & 0xff
+		} else {
+			value = 0x0a
+			length = 1
+		}
+		//fmt.Printf("GetMacroblockType: pt_ppict, bits6=0x%x, value=0x%x\n", index, value)
 		in = ternary((value&0x01) != 0, 1, 0)
 		pa = ternary((value&0x02) != 0, 1, 0)
 		mb = ternary((value&0x04) != 0, 1, 0)
@@ -110,8 +118,14 @@ func (ms *MpegState) GetMacroblockType(pt PictureType) (in, pa, mb, mf, qf uint3
 		index := ms.Peekbits(6)
 
 		// Handle 2 special cases: highest bit 1
-		value  := ternary(index < 0x20, macroblockTypeB[index] >> 8, uint16(ternary(index < 0x30, 0x0c, 0x0e)))
-		length := ternary(index < 0x20, macroblockTypeB[index] & 0xff, 2)
+		value, length := uint16(0), uint16(0)
+		if index < 0x20 {
+			value = macroblockTypeB[index] >> 8
+			length = macroblockTypeB[index] & 0xff
+		} else {
+			value = uint16(ternary(index < 0x30, 0x0c, 0x0e)) // 0b10 == 0xC, 0b11 == 0xE
+			length = 2
+		}
 
 		in = ternary((value & 0x01) != 0, 1, 0)
 		pa = ternary((value & 0x02) != 0, 1, 0)

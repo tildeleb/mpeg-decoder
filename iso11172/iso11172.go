@@ -548,8 +548,8 @@ var			bits3 uint32
 var			bits2 uint32
 var			bits1 uint32
 
-	//bits6 = ms.Peekbits(6)
-	//fmt.Printf("ReadMBType: bits6=0x%x/6\n", bits6)
+	bits6 = ms.Peekbits(6)
+	fmt.Printf("ReadMBType: bits6=0x%x/6\n", bits6)
 	switch pt {
 	case pt_ipict:
 		bits1 = ms.Peekbits(1)
@@ -1094,23 +1094,6 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) *Block {
 	return &blk
 }
 
-/*
-func MBString(in, pa, mb, mf, qf uint32) (ret string) {
-	var tags []string = []string{"", "in, ", "pa, ", "mb, ", "mf, ", "qf, "}
-	ret = "<"
-	ret = ret + tags[in*1]
-	ret = ret + tags[pa*2]
-	ret = ret + tags[mb*3]
-	ret = ret + tags[mf*4]
-	ret = ret + tags[qf*5]
-	if l := len(ret); l > 1 {
-		ret = ret[:l-2]
-		ret += ">"
-	}
-	return
-}
-*/
-
 func MBString(args ...uint32) (ret string) {
 	var tags []string = []string{"", "in, ", "pa, ", "mb, ", "mf, ", "qf, "}
 	ret = "<"
@@ -1130,6 +1113,7 @@ var	stuffed	int
 var escaped int
 var mbh		MacroBlockHeader
 var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement // ReadMBAI
+var gmbt func(*MpegState, PictureType) (uint32, uint32, uint32, uint32, uint32) = (*MpegState).GetMacroblockType // (*MpegState).ReadMBType // (*MpegState).GetMacroblockType
 
 	//fmt.Printf("iso.ReadMacroBlocks")
 	//fmt.Printf("ReadMacroBlock: ms.MacroBlockCtr=%d\n", ms.MacroBlockCtr)
@@ -1193,7 +1177,7 @@ var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement /
 		fmt.Printf("iso.ReadMacroBlock: MBAI=%d, pt=%s, Frame=%d, MacroBlock=%d\n", mbai, pt_str[ph.ph_picture_type], ms.FrameCtr, ms.MacroBlockCtr)
 	}
 
-	in, pa, mb, mf, qf := ms.ReadMBType(ph.ph_picture_type)
+	in, pa, mb, mf, qf := gmbt(ms, ph.ph_picture_type) // ms.ReadMBType(ph.ph_picture_type)
 	//in, pa, mb, mf, qf := ms.GetMacroblockType(ph.ph_picture_type)
 
 	if in == 0 && pa == 0 && mb == 0 && mf == 0 && qf ==0 {
