@@ -20,24 +20,33 @@ import "runtime/debug"
 //import "os"
 //import "io"
 
-type Mpeg1Parse interface{
-	ReadSeqenceHeader() *SequenceHeader
+// this interface not used in this code but it does define the routines needed to parse an ISO-11172-2 bitstream
+// There are some duplicate code here. To be rationalized after some profiling. Are table driven lookups really
+// faster than naive bit driven parsers. I wonder if cache misses on the tables is an equalizer?
+type Mpeg1Parser interface {
+	ReadSeqenceHeader() *SequenceHeader // *MpegState
 	ReadGroupHeader() *GroupHeader
 	ReadPictureHeader() *PictureHeader
 	ReadSliceHeader(uint32) *SliceHeader
 	ReadMBAI() uint32
 	ReadMBType(PictureType) (uint32, uint32, uint32, uint32, uint32)
-	ReadMBMVM() int16 // read macro block motion vector m
-	ReadYCbCr() (uint32, uint32, uint32, uint32, uint32, uint32)
-	ReadDCDC()
-	ReadMBDCTDCY()
-	ReadMBDCTDCC()
-	ReadMacroBlock(i int)
-	ReadMacroBlocks()
-	ReadMPEG1Steam()
+	ReadMotionVectors(*PictureHeader, *MacroBlockHeader) (*MotionVectors) 
+	//ReadYCbCr() (uint32, uint32, uint32, uint32, uint32, uint32)
+	ReadDCDC(int32) int8
+	ReadMBDCTDCY() int8
+	ReadMBDCTDCC() int8
+	ReadBlock(*MacroBlockHeader, int) (*Block)
+	ReadMacroBlock(*SequenceHeader, *GroupHeader, *PictureHeader, *SliceHeader) (*MacroBlockHeader)
+	ReadMPEG1Steam(int, int, bool, bool, bool, bool)
 
-	SetMBT(uint32, uint32, uint32, uint32, uint32)
-	SetYCbCr(uint32, uint32, uint32, uint32, uint32, uint32)
+	SetMBT(*MacroBlockHeader, uint32, uint32, uint32, uint32, uint32)
+	SetYCbCr(*MacroBlockHeader, uint32, uint32)
+
+	GetMacroblockAddressIncrement() uint32
+	GetMotionVector() int16
+	GetCodedBlockPattern() (uint32, uint32)
+	DecodeDCTCoeff(bool) (int, int)
+	GetMacroblockType(PictureType) (uint32, uint32, uint32, uint32, uint32)
 }
 
 type PictureType int
@@ -156,7 +165,9 @@ type MacroBlockHeader struct {
 	mbt_mb					bool
 	mbt_mf					bool
 	mbt_qf					bool
-	
+
+	mbt_mv					*MotionVectors
+/*
 	mbt_mfhp				uint16
 	mbt_mfhr				uint16
 	mbt_mfvp				uint16
@@ -165,7 +176,7 @@ type MacroBlockHeader struct {
 	mbt_mbhr				uint16
 	mbt_mbvp				uint16
 	mbt_mbvr				uint16
-	
+*/
 	mbt_blockv				[6]bool
 	mbt_blocks				[6]*Block
 }
@@ -919,20 +930,6 @@ var		size int32
 	return
 }
 
-/*
-func (bs *bitstream) ReadRLvlc() {
-var		bits2 uint32
-
-	bits2 = bs.Getbits(2)
-	switch bits2 {
-	case 0:
-	case 1:
-	case 2:
-	case 3:
-	}
-}
-*/
-
 // not needed in Go ?
 func mbt_init(mbt *MacroBlockHeader, pt PictureType) {
 
@@ -945,36 +942,12 @@ func mbt_init(mbt *MacroBlockHeader, pt PictureType) {
 	mbt.mbt_mb = false
 	mbt.mbt_mf = false
 	mbt.mbt_qf = false
-	
-	mbt.mbt_mfhp = 0
-	mbt.mbt_mfhr = 0
-	mbt.mbt_mfvp = 0
-	mbt.mbt_mfvr = 0
-	mbt.mbt_mbhp = 0
-	mbt.mbt_mbhr = 0
-	mbt.mbt_mbvp = 0
-	mbt.mbt_mbvr = 0
+	mbt.mbt_mv = nil
+
 	for i := 0; i < 6; i++ {
 		mbt.mbt_blockv[i] = false
 	}
 }
-
-/*
-            mVlc.decodeDCTCoeff(mInput, true, runLevel);
-
-		    run = runLevel.run;
-	    	mDctZigzag[run] = runLevel.level;
-        }
-
-        if (mPictureCodingType != Picture.D_TYPE) {
-            while (mInput.nextBits(2) != 0x2) {
-                // dctCoeffNext
-            	mVlc.decodeDCTCoeff(mInput, false, runLevel);
-
-                run += runLevel.run + 1;
-                mDctZigzag[run] = runLevel.level;
-            }
-*/
 
 func (ms *MpegState) ReadMotionVectors(ph *PictureHeader, mbh *MacroBlockHeader) (*MotionVectors) {
 	var gmv func(*MpegState) int16 = (*MpegState).GetMotionVector // ReadMBMVM
@@ -1028,7 +1001,7 @@ func (ms *MpegState) ReadMotionVectors(ph *PictureHeader, mbh *MacroBlockHeader)
 	return &mv
 }
 
-func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, mv *MotionVectors, i int) *Block {
+func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) *Block {
 	var blk Block
 
 	ms.Blocks++
@@ -1151,7 +1124,7 @@ func MBString(args ...uint32) (ret string) {
 	return
 }
 
-func (ms *MpegState) ReadMacroBlock(sh *SequenceHeader, gh *GroupHeader, ph *PictureHeader, sl *SliceHeader) (stop bool) {
+func (ms *MpegState) ReadMacroBlock(sh *SequenceHeader, gh *GroupHeader, ph *PictureHeader, sl *SliceHeader) (*MacroBlockHeader) {
 var bits11	uint32
 var	stuffed	int
 var escaped int
@@ -1241,7 +1214,7 @@ var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement /
 		}
 	}
 
-	mvp := ms.ReadMotionVectors(ph, &mbh)
+	mbh.mbt_mv = ms.ReadMotionVectors(ph, &mbh)
 
 	if (mbh.mbt_pa) {
 		// panic("iso.ReadMacroBlocks: CBP")
@@ -1266,13 +1239,13 @@ var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement /
 			if ms.PrintMacroBlocks {
 				fmt.Printf("%d: ", i)
 			}
-			mbh.mbt_blocks[i] = ms.ReadBlock(&mbh, mvp, i)
+			mbh.mbt_blocks[i] = ms.ReadBlock(&mbh, i)
 		}
 	}
 	if ms.PrintMacroBlocks {
 		fmt.Printf("\n")
 	}
-	return false
+	return &mbh
 }
 
 func (ms *MpegState) ReadMPEG1Steam(from, to int, readMacroBlocks, printHeaders, printVideoSlices, printMacroBlocks bool) {
@@ -1436,12 +1409,9 @@ findstartcode:
 			//os.Stdout.Sync()
 			for {
 				//fmt.Printf("MacroBlockCtr=%d\n", ms.MacroBlockCtr)
-				stop := ms.ReadMacroBlock(sh, gh, ph, slh)
+				_ = ms.ReadMacroBlock(sh, gh, ph, slh)
 				//ms.MacroBlockCtr++
-				if stop {
-					fmt.Printf("got stop\n")
-					break
-				}
+
 				tmp := ms.Peekbits(23)
 				//fmt.Printf("Peekbits(23)=0x%x\n", tmp)
 				if tmp == 0 {

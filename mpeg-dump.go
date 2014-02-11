@@ -1,6 +1,12 @@
+// Copyright © 2003 and 2014 Lawrence E. Bakst. All rights reserved.
+// THIS SOURCE CODE IS THE PROPRIETARY INTELLECTUAL PROPERTY AND CONFIDENTIAL
+// INFORMATION OF LAWRENCE E. BAKST AND IS PROTECTED UNDER U.S. AND
+// INTERNATIONAL LAW. ANY USE OF THIS SOURCE CODE WITHOUT THE PRIOR WRITTEN
+// AUTHORIZATION OF LAWRENCE E. BAKST IS STRICTLY PROHIBITED.
+
 package main
 
-//import "fmt"
+import "fmt"
 import "flag"
 //import "os"
 //import "io"
@@ -17,9 +23,20 @@ var psf = flag.Bool("ps", false, "print stats")
 var from = flag.Int("from", 0, "start at frame #")
 var to = flag.Int("to", 9999999, "stop at frame #")
 
+func chk(i iso11172.Mpeg1Parser) {
+	_, ok := i.(iso11172.Mpeg1Parser)
+	//fmt.Printf("%T | %T\n", i, x)
+	if ok {
+		//fmt.Printf("OK")
+	} else {
+		fmt.Printf("BAD")	
+	}
+}
+
 func main() {
 	var ms iso11172.MpegState
 
+	chk(&ms)
 	ms.CBPS = make(map[string]int, 100)
 	flag.Parse()
 	if *vf {
