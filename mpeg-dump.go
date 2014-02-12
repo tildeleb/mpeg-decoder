@@ -13,10 +13,12 @@ import "flag"
 import "leb/mpeg-decoder/bitstream"
 import "leb/mpeg-decoder/iso11172"
 
-var rmbf = flag.Bool("rmb", true, "read macro blocks")
 var phdf = flag.Bool("phd", false, "print headers")
 var pvsf = flag.Bool("pvs", false, "print video slices")
 var pmbf = flag.Bool("pmb", false, "print macro blocks")
+var pbcf = flag.Bool("pbc", false, "print block coefficients")
+var prmbf = flag.Bool("prmb", false, "print raw macro blocks")
+var rmbf = flag.Bool("rmb", true, "read macro blocks")
 var vf = flag.Bool("v", false, "verbose; turns on all printing")
 var psf = flag.Bool("ps", false, "print stats")
 
@@ -34,14 +36,14 @@ func chk(i iso11172.Mpeg1Parser) {
 }
 
 func main() {
-	var ms iso11172.MpegState
-
-	chk(&ms)
-	ms.CBPS = make(map[string]int, 100)
 	flag.Parse()
 	if *vf {
 		*phdf, *pvsf, *pmbf = true, true, true
 	}
+	ms := iso11172.New(*phdf, *pvsf, *pmbf, *pbcf, *prmbf, *rmbf)
+	chk(ms)
+	ms.CBPS = make(map[string]int, 100)
+
 	for i := 0; i < flag.NArg(); i++ {
 		//fmt.Printf("arg %d=|%s|\n", i, flag.Arg(i))
 		bs, err := bitstream.NewFromFile(flag.Arg(i), "r")
@@ -49,7 +51,7 @@ func main() {
 			panic("bad filename")
 		}
 		ms.Bitstream = bs
-		ms.ReadMPEG1Steam(*from, *to, *rmbf, *phdf, *pvsf, *pmbf)
+		ms.ReadMPEG1Steam(*from, *to)
 		//fmt.Printf("ms.MpegStats=%#v\n", ms.MpegStats)
 		if *psf {
 			ms.PrintStats()

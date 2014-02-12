@@ -30,17 +30,18 @@ type Mpeg1Parser interface {
 	ReadSliceHeader(uint32) *SliceHeader
 	ReadMBAI() uint32
 	ReadMBType(PictureType) (uint32, uint32, uint32, uint32, uint32)
-	ReadMotionVectors(*PictureHeader, *MacroBlockHeader) (*MotionVectors) 
+	ReadMotionVectors(*PictureHeader, *MacroBlock) (*MotionVectors) 
 	//ReadYCbCr() (uint32, uint32, uint32, uint32, uint32, uint32)
 	ReadDCDC(int32) int8
 	ReadMBDCTDCY() int8
 	ReadMBDCTDCC() int8
-	ReadBlock(*MacroBlockHeader, int) (*Block)
-	ReadMacroBlock(*SequenceHeader, *GroupHeader, *PictureHeader, *SliceHeader) (*MacroBlockHeader)
-	ReadMPEG1Steam(int, int, bool, bool, bool, bool)
+	ReadBlock(*MacroBlock, int) (*Block)
+	ReadMacroBlock(*SequenceHeader, *GroupHeader, *PictureHeader, *SliceHeader) (*MacroBlock, bool)
+	ReadRawMacroBlock(*SequenceHeader, *GroupHeader, *PictureHeader, *SliceHeader) (*MacroBlock, int, bool)
+	ReadMPEG1Steam(int, int)
 
-	SetMBT(*MacroBlockHeader, uint32, uint32, uint32, uint32, uint32)
-	SetYCbCr(*MacroBlockHeader, uint32, uint32)
+	SetMBT(*MacroBlock, uint32, uint32, uint32, uint32, uint32)
+	SetYCbCr(*MacroBlock, uint32, uint32)
 
 	GetMacroblockAddressIncrement() uint32
 	GetMotionVector() int16
@@ -142,7 +143,8 @@ type PictureHeader struct {
 	ph_eip					[]byte
 	ph_ext					[]byte
 	ph_ud					[]byte
-	ph_shs					[]*SliceHeader
+	ph_sls					[]*SliceHeader
+	ph_mbs					[]*MacroBlock
 }
 
 type SliceHeader struct {
@@ -151,10 +153,10 @@ type SliceHeader struct {
 	sl_extra				[]byte
 	sl_eip_count			int
 	sl_eip					[]byte
-	sl_mbh					[]*MacroBlockHeader
+	sl_mbs					[]*MacroBlock
 }
 
-type MacroBlockHeader struct {
+type MacroBlock struct {
 	mbt_no					int32
 	mbt_pt					PictureType			
 	mbt_ai					uint32
@@ -165,6 +167,7 @@ type MacroBlockHeader struct {
 	mbt_mb					bool
 	mbt_mf					bool
 	mbt_qf					bool
+	mbt_skipped				bool
 
 	mbt_mv					*MotionVectors
 /*
@@ -221,6 +224,7 @@ type Block struct {
 type MpegStats struct {
 	Frames					int
 	MacroBlocks				int
+	RawMacroBlocks			int
 	SkippedMB				int
 	MotionVectors			int
 	MotionVectorsForward	int
@@ -240,12 +244,36 @@ type MpegState struct {
 	*Bitstream
 	MpegStats
 	sh					[]*SequenceHeader
+	PreviousMB			*MacroBlock		// used for skipped macro blocks
+	NextMB				*MacroBlock		// after skipped macro blocks this is the MB that will be returned
+	LastMB				*MacroBlock		// after skipped macro blocks this is the MB that will be returned
 	MacroBlockCtr		int
 	FrameCtr			int
+	SkipCnt				int // how many MB left to skip
+	EOMB				bool
+
+	// printing flags
 	ReadMacroBlocks		bool
 	PrintMacroBlocks	bool
+	PrintBlockCoeffs	bool
 	PrintHeaders		bool
 	PrintVideoSlices	bool
+	PrintRawMacroBlocks	bool
+}
+
+// New(printHeaders, printVideoSlices, printMacroBlocks, printBlockCoeffs, printRawMacroBlocks, readMacroBlocks bool)
+
+func New(printHeaders, printVideoSlices, printMacroBlocks, printBlockCoeffs, printRawMacroBlocks, readMacroBlocks bool) *MpegState {
+var ms MpegState
+
+	// need constructor
+	ms.PrintHeaders = printHeaders
+	ms.PrintVideoSlices = printVideoSlices
+	ms.PrintMacroBlocks = printMacroBlocks
+	ms.PrintBlockCoeffs = printBlockCoeffs
+	ms.PrintRawMacroBlocks = printRawMacroBlocks
+	ms.ReadMacroBlocks = readMacroBlocks
+	return &ms
 }
 
 var next_code	uint32
@@ -254,6 +282,7 @@ func (ms *MpegState) PrintStats() {
 	fmt.Printf("Frames: %d\n", ms.Frames)
 	fmt.Printf("MacroBlocks: %d\n", ms.MacroBlocks)
 	fmt.Printf("SkippedMB: %d\n", ms.SkippedMB)
+	fmt.Printf("RawMacroBlocks: %d\n", ms.RawMacroBlocks)
 	fmt.Printf("MotionVectors: %d\n", ms.MotionVectors)
 	fmt.Printf("MotionVectorsForward: %d\n", ms.MotionVectorsForward)
 	fmt.Printf("MotionVectorsBackward: %d\n", ms.MotionVectorsBackward)
@@ -517,7 +546,7 @@ var 			bits4a, bits4b, bits3, bits2, bits1 uint32
 }
 
 
-func (ms *MpegState) SetMBT(mbh *MacroBlockHeader, in, pa, mb, mf, qf uint32) {
+func (ms *MpegState) SetMBT(mbh *MacroBlock, in, pa, mb, mf, qf uint32) {
 var ui32_to_bool = func(b uint32) bool {
 	switch b {
 	case 0:
@@ -529,7 +558,7 @@ var ui32_to_bool = func(b uint32) bool {
 	}
 }
 
-	if ms.PrintMacroBlocks {
+	if ms.PrintRawMacroBlocks {
 		fmt.Printf("iso.SetMBT in=%d, pa=%d, mb=%d, mf=%d, qf=%d\n", in, pa, mb, mf, qf)
 	}
 	mbh.mbt_in = ui32_to_bool(in)
@@ -751,7 +780,7 @@ var ternary = func(c bool, a, b int16) int16 {
 }
 
 
-func (ms *MpegState) SetYCbCrold(mbt *MacroBlockHeader, y0, y1, y2, y3, cb, cr uint32) {
+func (ms *MpegState) SetYCbCrold(mbt *MacroBlock, y0, y1, y2, y3, cb, cr uint32) {
 var ternary = func(c bool, a, b bool) bool {
 	if (c) {
 		return a
@@ -770,7 +799,7 @@ var ternary = func(c bool, a, b bool) bool {
 		//mbt.mbt_blockv[0], mbt.mbt_blockv[1], mbt.mbt_blockv[2], mbt.mbt_blockv[3], mbt.mbt_blockv[4], mbt.mbt_blockv[5])
 }
 
-func (ms *MpegState) SetYCbCr(mbt *MacroBlockHeader, lumabits, chromabits uint32) {
+func (ms *MpegState) SetYCbCr(mbt *MacroBlock, lumabits, chromabits uint32) {
 var ternary = func(c bool, a, b bool) bool {
 	if (c) {
 		return a
@@ -784,7 +813,7 @@ var ternary = func(c bool, a, b bool) bool {
 	mbt.mbt_blockv[3] = ternary(((lumabits&0x1) != 0), true, false)
 	mbt.mbt_blockv[4] = ternary(((chromabits&0x2) != 0), true, false)
 	mbt.mbt_blockv[5] = ternary(((chromabits&0x1) != 0), true, false)
-	if ms.PrintMacroBlocks {
+	if ms.PrintRawMacroBlocks {
 		fmt.Printf("iso.SetYCbCr: y0=%v, y1=%v, y2=%v, y3=%v, cb=%v, cr=%v\n",
 			mbt.mbt_blockv[0], mbt.mbt_blockv[1], mbt.mbt_blockv[2],
 			mbt.mbt_blockv[3], mbt.mbt_blockv[4], mbt.mbt_blockv[5])
@@ -931,7 +960,7 @@ var		size int32
 }
 
 // not needed in Go ?
-func mbt_init(mbt *MacroBlockHeader, pt PictureType) {
+func mbt_init(mbt *MacroBlock, pt PictureType) {
 
 	mbt.mbt_pt = pt
 	mbt.mbt_ai = 0
@@ -949,7 +978,7 @@ func mbt_init(mbt *MacroBlockHeader, pt PictureType) {
 	}
 }
 
-func (ms *MpegState) ReadMotionVectors(ph *PictureHeader, mbh *MacroBlockHeader) (*MotionVectors) {
+func (ms *MpegState) ReadMotionVectors(ph *PictureHeader, mbh *MacroBlock) (*MotionVectors) {
 	var gmv func(*MpegState) int16 = (*MpegState).GetMotionVector // ReadMBMVM
 	var mv MotionVectors
 
@@ -993,7 +1022,7 @@ func (ms *MpegState) ReadMotionVectors(ph *PictureHeader, mbh *MacroBlockHeader)
 		}
 	}
 	if mbh.mbt_mf || mbh.mbt_mb {
-		if ms.PrintMacroBlocks {
+		if ms.PrintRawMacroBlocks {
 			fmt.Printf("iso.ReadMotionVectors: mfhp=%d, mfhr=%d, mfvp=%d, mfvr=%d, mbhp=%d, mbhr=%d, mbvp=%d, mbvr=%d\n",
 				mv[mfhp], mv[mfhr], mv[mfvp], mv[mfvr], mv[mbhp], mv[mbhr], mv[mbvp], mv[mbvr])
 		}
@@ -1001,7 +1030,7 @@ func (ms *MpegState) ReadMotionVectors(ph *PictureHeader, mbh *MacroBlockHeader)
 	return &mv
 }
 
-func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) *Block {
+func (ms *MpegState) ReadBlock(mbh *MacroBlock, i int) *Block {
 	var blk Block
 
 	ms.Blocks++
@@ -1026,17 +1055,17 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) *Block {
 		switch i {
 		case 0, 1, 2, 3:
 			blk.Coef[0] = ms.ReadMBDCTDCY()
-			if ms.PrintMacroBlocks {
+			if ms.PrintRawMacroBlocks {
 				fmt.Printf("LDC:%d", blk.Coef[0])
 			}
 		case 4:
 			blk.Coef[0] = ms.ReadMBDCTDCC()
-			if ms.PrintMacroBlocks {
+			if ms.PrintRawMacroBlocks {
 				fmt.Printf("CDC:%d", blk.Coef[0])
 			}
 		case 5:
 			blk.Coef[0] = ms.ReadMBDCTDCC()
-			if ms.PrintMacroBlocks {
+			if ms.PrintRawMacroBlocks {
 				fmt.Printf("CDC:%d", blk.Coef[0])
 			}
 		}
@@ -1046,7 +1075,7 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) *Block {
 		run, level := ms.DecodeDCTCoeff(true)
 		fill(run)
 		blk.Coef[cnt] = int8(level)
-		if ms.PrintMacroBlocks {
+		if ms.PrintRawMacroBlocks {
 			fmt.Printf("%d: %d/%d", cnt, run, level)
 		}
 		cnt++
@@ -1062,7 +1091,7 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) *Block {
 		for ms.Peekbits(2) != EOB {
 			run, level := ms.DecodeDCTCoeff(false)
 			fill(run)
-			if ms.PrintMacroBlocks {
+			if ms.PrintRawMacroBlocks {
 				fmt.Printf(", %d: %d/%d", cnt, run, level)
 			}
 			if cnt > 63 {
@@ -1075,14 +1104,14 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) *Block {
 		if true && ms.Getbits(2) != EOB {
 			panic("not EOB")
 		}
-		if ms.PrintMacroBlocks {
+		if ms.PrintRawMacroBlocks {
 			fmt.Printf(", EOB2\n")
 		}
 	} else {
 		if true && ms.Getbits(2) != EOB {
 			panic("not EOB")
 		}
-		if ms.PrintMacroBlocks {
+		if ms.PrintRawMacroBlocks {
 			fmt.Printf(", EOB1\n")
 		}
 	}
@@ -1094,35 +1123,46 @@ func (ms *MpegState) ReadBlock(mbh *MacroBlockHeader, i int) *Block {
 	return &blk
 }
 
-func MBString(args ...uint32) (ret string) {
+func bool_to_int(v bool) int {
+	if v {
+		return 1
+	} else {
+		return 0
+	}
+}
+
+func MBString(args ...bool) (ret string) {
 	var tags []string = []string{"", "in, ", "pa, ", "mb, ", "mf, ", "qf, "}
 	ret = "<"
 	for i, v := range args {
-		ret = ret + tags[int(v)*(i+1)]
+		ret = ret + tags[bool_to_int(v)*(i+1)]
 	}
 	if l := len(ret); l > 1 {
 		ret = ret[:l-2]
 		ret += ">"
 	}
 	return
+
 }
 
-func (ms *MpegState) ReadMacroBlock(sh *SequenceHeader, gh *GroupHeader, ph *PictureHeader, sl *SliceHeader) (*MacroBlockHeader) {
+func (ms *MpegState) ReadRawMacroBlock(sh *SequenceHeader, gh *GroupHeader, ph *PictureHeader, sl *SliceHeader) (rmb *MacroBlock, skip int, eomb bool) {
 var bits11	uint32
 var	stuffed	int
 var escaped int
-var mbh		MacroBlockHeader
+var cmb		MacroBlock
 var gmbai func(*MpegState) uint32 = (*MpegState).GetMacroblockAddressIncrement // ReadMBAI
 var gmbt func(*MpegState, PictureType) (uint32, uint32, uint32, uint32, uint32) = (*MpegState).GetMacroblockType // (*MpegState).ReadMBType // (*MpegState).GetMacroblockType
 
-	//fmt.Printf("iso.ReadMacroBlocks")
+	//fmt.Printf("iso.ReadRawMacroBlock: start\n")
 	//fmt.Printf("ReadMacroBlock: ms.MacroBlockCtr=%d\n", ms.MacroBlockCtr)
 
 	if ph.ph_picture_type != pt_ipict && ph.ph_picture_type != pt_ppict && ph.ph_picture_type != pt_bpict {
-		panic("iso.ReadMacroBlock: can't parse anything but IPB")
+		panic("iso.ReadRawMacroBlock: can't parse anything but IPB")
 	}
 
-	mbt_init(&mbh, ph.ph_picture_type)
+	mbt_init(&cmb, ph.ph_picture_type)
+
+	mbai := uint32(0)
 	for {
 		bits11 = ms.Peekbits(11) // check for macro block stuffing
 		if bits11 == 0xF {
@@ -1133,7 +1173,7 @@ var gmbt func(*MpegState, PictureType) (uint32, uint32, uint32, uint32, uint32) 
 		}
 	}
 	if stuffed != 0 {
-		fmt.Printf("ReadMacroBlock: %d stuffed\n", stuffed)
+		fmt.Printf("ReadRawMacroBlock: %d stuffed\n", stuffed)
 		stuffed = 0
 	}
 	
@@ -1141,98 +1181,198 @@ var gmbt func(*MpegState, PictureType) (uint32, uint32, uint32, uint32, uint32) 
 		bits11 = ms.Peekbits(11) // check for macro block escape
 		if bits11 == 0x8 {
 			_ = ms.Getbits(11)
-			mbh.mbt_ai += 33
+			mbai += 33
 			escaped++
 		} else {
 			break
 		}
 	}
 	if escaped != 0 {
-		fmt.Printf("ReadMacroBlock: %d escaped\n", escaped)
+		fmt.Printf("ReadRawMacroBlock: %d escaped\n", escaped)
 		escaped = 0
 	}
 
 	// get macro block address increment
 	//ms.PrintState("")
 
-	mbai := gmbai(ms)
-	//fmt.Printf("MBAI=%d, pt=%s\n", mbai, pt_str[ph.ph_picture_type])
-	if mbai > 1 {
-		// generate skipped macblocks
-		for i := uint32(1); i < mbai; i++ {
-			if ms.PrintMacroBlocks {
-				fmt.Printf("skipped macro block %d\n", ms.MacroBlockCtr + int(i))
-			}
-			ms.MacroBlocks++
-			ms.SkippedMB++
-		}
-		if ms.PrintMacroBlocks {
-			fmt.Printf("\n")
-		}
-	}
-	ms.MacroBlockCtr += int(mbai)
-	mbh.mbt_ai = uint32(ms.MacroBlockCtr)
-	ms.MacroBlocks++
-	if ms.PrintMacroBlocks {
-		fmt.Printf("iso.ReadMacroBlock: MBAI=%d, pt=%s, Frame=%d, MacroBlock=%d\n", mbai, pt_str[ph.ph_picture_type], ms.FrameCtr, ms.MacroBlockCtr)
+	mbai += gmbai(ms)
+	cmb.mbt_ai = mbai
+	skip = int(mbai)
+	if ms.PrintRawMacroBlocks {
+		fmt.Printf("ReadRawMacroBlock: MBAI=%d, pt=%s\n", mbai, pt_str[ph.ph_picture_type])
 	}
 
 	in, pa, mb, mf, qf := gmbt(ms, ph.ph_picture_type) // ms.ReadMBType(ph.ph_picture_type)
 	//in, pa, mb, mf, qf := ms.GetMacroblockType(ph.ph_picture_type)
 
 	if in == 0 && pa == 0 && mb == 0 && mf == 0 && qf ==0 {
-		panic("iso.ReadMacroBlock: bad GetMacroblockType")
+		panic("iso.ReadRawMacroBlock: bad GetMacroblockType")
 	}
-	ms.SetMBT(&mbh, in, pa, mb, mf, qf)
+	ms.SetMBT(&cmb, in, pa, mb, mf, qf)
 	//fmt.Printf("%s\n", MBString(in, pa, mb, mf, qf))
-	ms.CBPS[MBString(in, pa, mb, mf, qf)]++
+	ms.CBPS[MBString(cmb.mbt_pa, cmb.mbt_mb, cmb.mbt_mf, cmb.mbt_qf)]++
 
-	if mbh.mbt_qf {
-		mbh.mbt_qs = ms.Russ(5)
+	if cmb.mbt_qf {
+		cmb.mbt_qs = ms.Russ(5)
 		ms.Quants++
-		if ms.PrintMacroBlocks {
-			fmt.Printf("iso.ReadMacroBlock: q=%d\n", mbh.mbt_qs)
+		if ms.PrintRawMacroBlocks {
+			fmt.Printf("iso.ReadRawMacroBlock: q=%d\n", cmb.mbt_qs)
 		}
-		if mbh.mbt_qs == 0 {
+		if cmb.mbt_qs == 0 {
 			panic("mbt_qs == 0")
 		}
 	}
 
-	mbh.mbt_mv = ms.ReadMotionVectors(ph, &mbh)
+	cmb.mbt_mv = ms.ReadMotionVectors(ph, &cmb)
 
-	if (mbh.mbt_pa) {
+	if (cmb.mbt_pa) {
 		// panic("iso.ReadMacroBlocks: CBP")
 		lumabits, chromabits := ms.GetCodedBlockPattern()
-		ms.SetYCbCr(&mbh, lumabits, chromabits)
+		ms.SetYCbCr(&cmb, lumabits, chromabits)
 	} else {
-		if (mbh.mbt_in) {
-			ms.SetYCbCr(&mbh, 0xFF, 0xFF)
+		if (cmb.mbt_in) {
+			ms.SetYCbCr(&cmb, 0xFF, 0xFF)
 		} else {
-			ms.SetYCbCr(&mbh, 0x00, 0x00) // ???
+			ms.SetYCbCr(&cmb, 0x00, 0x00) // ???
 		}
 	}
 
-	for i, v := range mbh.mbt_blockv {
+	for i, v := range cmb.mbt_blockv {
 		if v {
-/*
-			if ms.MacroBlockCtr == 2 && i == 5 {
-				ms.PrintState("")
-			}
-*/
-
-			if ms.PrintMacroBlocks {
+			if ms.PrintRawMacroBlocks {
 				fmt.Printf("%d: ", i)
 			}
-			mbh.mbt_blocks[i] = ms.ReadBlock(&mbh, i)
+			cmb.mbt_blocks[i] = ms.ReadBlock(&cmb, i)
 		}
 	}
-	if ms.PrintMacroBlocks {
+	if ms.PrintRawMacroBlocks {
 		fmt.Printf("\n")
 	}
-	return &mbh
+	ms.RawMacroBlocks++
+
+	// check for end of macro blocks, start code next
+	tmp := ms.Peekbits(23)
+	//fmt.Printf("Peekbits(23)=0x%x\n", tmp)
+	if tmp == 0 {
+		eomb = true
+	}
+	//fmt.Printf("iso.ReadRawMacroBlock: end")
+	return &cmb, skip, eomb
 }
 
-func (ms *MpegState) ReadMPEG1Steam(from, to int, readMacroBlocks, printHeaders, printVideoSlices, printMacroBlocks bool) {
+func dump_block(b *Block) {
+	var run, cnt int
+	for i, level := range b.Coef {
+		if level == 0 {
+			run++
+		} else {
+			if (cnt > 0) {
+				fmt.Printf(", ")
+			}
+			fmt.Printf("%d: %d/%d", i, run, level)
+			cnt++
+			run = 0
+		}
+	}
+}
+
+// Mostly handles skipped macro blocks, calls ReadRawMacroBlock to get an acyual macro block from the bitstream
+func (ms *MpegState) ReadMacroBlock(sh *SequenceHeader, gh *GroupHeader, ph *PictureHeader, sl *SliceHeader) (mb *MacroBlock, eomb bool) {
+
+	if ms.SkipCnt > 0 {
+		ms.SkipCnt--
+		if ms.SkipCnt == 0 {
+			if false {
+				fmt.Printf("next macro block %d\n", ms.MacroBlockCtr)
+			}
+			mb = ms.NextMB	// ??? good enough copy???
+		} else {
+			if false {
+				fmt.Printf("(2)skipped macro block %d\n", ms.MacroBlockCtr)
+			}
+			ms.SkippedMB++
+			mb = ms.PreviousMB // ??? good enough copy???
+		}
+	} else {
+		rmb, skip, aeomb := ms.ReadRawMacroBlock(sh, gh, ph, sl)
+		ms.EOMB = aeomb
+		if (skip > 1) {
+			ms.SkipCnt = skip - 1
+			ms.NextMB = rmb
+			ms.PreviousMB = ms.LastMB
+			mb = ms.LastMB
+			if false {
+				fmt.Printf("(1)skipped macro block %d\n", ms.MacroBlockCtr)
+			}
+			ms.SkippedMB++
+		} else {
+			ms.LastMB = rmb
+			mb = rmb
+		}
+	}
+
+	if ms.PrintMacroBlocks {
+		fill := ""
+		if ms.SkipCnt > 0 {
+			fill = " "
+		}
+		fmt.Printf("iso.ReadMacroBlock: pt=%s, Frame=%06d, MacroBlock=%04d, SkipCnt=%02d, skip=%v, qs=%d, cbp=%v, %stype=%s\n",
+			pt_str[ph.ph_picture_type], ms.FrameCtr, ms.MacroBlockCtr, ms.SkipCnt, ms.SkipCnt > 0, mb.mbt_qs, mb.mbt_blockv, fill, MBString(mb.mbt_in, mb.mbt_pa, mb.mbt_mb, mb.mbt_mf, mb.mbt_qf))
+
+		if (ms.PrintBlockCoeffs) {
+			//fmt.Printf("v=%v\n", mb.mbt_blockv)
+			for i := range mb.mbt_blockv {
+				if mb.mbt_blockv[i] {
+					fmt.Printf("%d: ", i)
+					dump_block(mb.mbt_blocks[i])
+					fmt.Printf("\n")
+				}
+			}
+		fmt.Printf("\n")
+		}
+	}
+	ph.ph_mbs = append(ph.ph_mbs, mb)
+	sl.sl_mbs = append(sl.sl_mbs, mb)
+	ms.MacroBlockCtr++
+	ms.MacroBlocks++
+	if ms.SkipCnt > 0 {
+		eomb = false
+	} else {
+		eomb = ms.EOMB
+		ms.EOMB = false
+	}
+	return
+}
+
+
+func iterateSlices(sh *SequenceHeader) {
+	var ghc, phc, mb1c, mb2c int
+
+	for _, gh := range sh.sh_ghs {
+		ghc++
+		for _, ph := range gh.gh_phs {
+			phc++
+			for k3, _ := range ph.ph_mbs {
+				k3++
+				mb1c++
+			}
+			for k4, _ := range ph.ph_mbs {
+				k4++
+				mb2c++
+			}
+		}
+	}
+
+	fmt.Printf("sh_ghs=%d, sh_phs=%d, gh_phs=%d\n", len(sh.sh_ghs), len(sh.sh_phs), len(sh.sh_ghs[0].gh_phs))
+	fmt.Printf("ghc=%d, phc=%d, mb1c=%d, mb2c=%d\n", ghc, phc, mb1c, mb2c)
+/*
+	fmt.Printf("sh_ghs=%d, sh_phs=%d, gh_phs=%d, len(sh.sh_ghs), len(sh.sh_phs), len(gh.gh_phs))
+	ph_sls=%d, ph_mbs=%d, sl_mbs=%d\n",
+	len(sh.sh_ghs), len(sh.sh_phs), len(gh.gh_phs), len(ph.ph_sls), len(ph.ph_mbs), len(slh.sl_mbs))
+*/
+}
+
+func (ms *MpegState) ReadMPEG1Steam(from, to int) {
 var sh				*SequenceHeader
 var gh				*GroupHeader
 var ph				*PictureHeader
@@ -1245,7 +1385,7 @@ var uc				byte
 var	scf				bool
 var	vscf			bool
 
-
+/*
 	defer func() {
 		if p := recover(); p != nil {
 			if p == "EOF" {
@@ -1256,14 +1396,9 @@ var	vscf			bool
 			return
 		}
 	}()
+*/
 
-// need constructor
-ms.ReadMacroBlocks = readMacroBlocks
-ms.PrintMacroBlocks = printMacroBlocks
-ms.PrintHeaders = printHeaders
-ms.PrintVideoSlices = printVideoSlices
-
-ms.MacroBlockCtr = -1
+ms.MacroBlockCtr = 0
 
 //fmt.Printf("ReadMPEG1Steam: from=%d, to=%d, readMacroBlocks=%v, printMacroBlocks=%v\n", from, to, readMacroBlocks, printMacroBlocks)
 findstartcode:
@@ -1296,7 +1431,7 @@ findstartcode:
 			vscf = false
 			ms.FrameCtr++
 			ms.Frames++
-			ms.MacroBlockCtr = -1
+			ms.MacroBlockCtr = 0
 		}
 		switch {
 		case start_code == SEQ_HEADER_CODE:
@@ -1306,12 +1441,22 @@ findstartcode:
 				fmt.Printf("    sh_hor_size=%d, sh_ver_size=%d, sh_pel_aspect_ratio=%d, sh_picture_rate=%d, sh_bit_rate=%d\n",
 					sh.sh_hor_size, sh.sh_ver_size, sh.sh_pel_aspect_ratio, sh.sh_picture_rate, sh.sh_bit_rate)
 			}
+		case start_code == GROUP_START_CODE:
+			gh = ms.ReadGroupHeader()
+			if ms.PrintHeaders {
+				fmt.Printf("GROUP_START_CODE TC=%02d:%02d:%02d:%02d marker=%v, dff=%v\n",
+					gh.gh_tc_hr, gh.gh_tc_min, gh.gh_tc_sec, gh.gh_tc_pic, gh.gh_marker_bit, gh.gh_drop_frame_flag)
+			}
+			sh.sh_ghs = append(sh.sh_ghs, gh)
 		case start_code == PICTURE_START_CODE:
 			ph = ms.ReadPictureHeader()
+			gh.gh_phs = append(gh.gh_phs, ph)
+			sh.sh_phs = append(sh.sh_phs, ph)
 			if ms.PrintHeaders {
 				fmt.Printf("\nFrame: %d\n", ms.FrameCtr)
 				fmt.Printf("PICTURE_START_CODE type=%s\n", pt_str[ph.ph_picture_type])
 				fmt.Printf("    ph_temporal_ref=%d, ph_vbv_delay=%d\n", ph.ph_temporal_ref, ph.ph_vbv_delay)
+				fmt.Printf("    sh_ghs=%d, sh_phs=%d, gh_phs=%d\n", len(sh.sh_ghs), len(sh.sh_phs), len(sh.sh_ghs[0].gh_phs))
 			}
 			switch ph.ph_picture_type {
 			case pt_ipict:
@@ -1321,24 +1466,18 @@ findstartcode:
 				fallthrough	// ho ho
 			case pt_bpict:
 				if ms.PrintHeaders {
-					fmt.Printf("ph.ph_full_pell_forw_vec=%v, ph.ph_forw_code=%d\n",  
+					fmt.Printf("    ph.ph_full_pell_forw_vec=%v, ph.ph_forw_code=%d\n",  
 						ph.ph_full_pell_forw_vec, ph.ph_forw_code)
 				}
 				if ph.ph_picture_type == pt_bpict {
 					ms.BFrames++
 				}
 				if ms.PrintHeaders {
-					fmt.Printf("ph.ph_full_pell_back_vec=%v, ph.ph_back_code=%d\n",  
+					fmt.Printf("    ph.ph_full_pell_back_vec=%v, ph.ph_back_code=%d\n",  
 						ph.ph_full_pell_back_vec, ph.ph_back_code)
 				}
 			case pt_dpict:
 				ms.DFrames++
-			}
-		case start_code == GROUP_START_CODE:
-			gh = ms.ReadGroupHeader()
-			if ms.PrintHeaders {
-				fmt.Printf("GROUP_START_CODE TC=%02d:%02d:%02d:%02d marker=%v, dff=%v\n",
-					gh.gh_tc_hr, gh.gh_tc_min, gh.gh_tc_sec, gh.gh_tc_pic, gh.gh_marker_bit, gh.gh_drop_frame_flag)
 			}
 		case start_code == USER_DATA_START_CODE:
 			fmt.Printf("USER_DATA_START_CODE\n")
@@ -1354,6 +1493,7 @@ findstartcode:
 			if ms.PrintHeaders {
 				fmt.Printf("SEQ_END_CODE\n")
 			}
+			iterateSlices(sh)
 			return
 			break // ???
 		case start_code == ISO_11172_END_CODE:
@@ -1376,6 +1516,7 @@ findstartcode:
 				}
 			}
 			slh = ms.ReadSliceHeader(start_code)
+			ph.ph_sls = append(ph.ph_sls, slh)
 			if ms.PrintVideoSlices {
 				fmt.Printf("VIDEO SLICE CODE 0x%X FrameCtr=%d, row start=%d\n", ul, ms.FrameCtr, (ul - 1)*16)
 			}
@@ -1386,19 +1527,18 @@ findstartcode:
 				ms.PrintFill(true)
 			}
 */
-			if !readMacroBlocks || (ms.FrameCtr < from || ms.FrameCtr > to) {
+			if !ms.ReadMacroBlocks || (ms.FrameCtr < from || ms.FrameCtr > to) {
 				continue findstartcode
 			}
 			//fmt.Printf("FrameCtr=%d\n", ms.FrameCtr)
 			//os.Stdout.Sync()
 			for {
 				//fmt.Printf("MacroBlockCtr=%d\n", ms.MacroBlockCtr)
-				_ = ms.ReadMacroBlock(sh, gh, ph, slh)
+				mb, eomb := ms.ReadMacroBlock(sh, gh, ph, slh)
+				ph.ph_mbs = append(ph.ph_mbs, mb)
+				slh.sl_mbs = append(slh.sl_mbs, mb)
 				//ms.MacroBlockCtr++
-
-				tmp := ms.Peekbits(23)
-				//fmt.Printf("Peekbits(23)=0x%x\n", tmp)
-				if tmp == 0 {
+				if eomb {
 					break
 				}
 			}
@@ -1408,3 +1548,4 @@ findstartcode:
 		}
 	}
 }
+
