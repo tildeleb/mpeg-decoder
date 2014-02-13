@@ -1,9 +1,4 @@
-// Copyright © 2003 and 2014 Lawrence E. Bakst. All rights reserved.
-// THIS SOURCE CODE IS THE PROPRIETARY INTELLECTUAL PROPERTY AND CONFIDENTIAL
-// INFORMATION OF LAWRENCE E. BAKST AND IS PROTECTED UNDER U.S. AND
-// INTERNATIONAL LAW. ANY USE OF THIS SOURCE CODE WITHOUT THE PRIOR WRITTEN
-// AUTHORIZATION OF LAWRENCE E. BAKST IS STRICTLY PROHIBITED.
-
+// Copyright © 2014 Lawrence E. Bakst. All rights reserved.
 package main
 
 import "fmt"
@@ -51,9 +46,10 @@ func main() {
 			panic("bad filename")
 		}
 		ms.Bitstream = bs
-		ms.ReadMPEG1Steam(*from, *to)
+		sh := ms.ReadMPEG1Steam(*from, *to)
 		//fmt.Printf("ms.MpegStats=%#v\n", ms.MpegStats)
 		if *psf {
+			iso11172.IterateSlices(sh)
 			ms.PrintStats()
 		}
 	}

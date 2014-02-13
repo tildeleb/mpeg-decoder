@@ -1,8 +1,9 @@
-// Copyright © 2012-2014 Lawrence E. Bakst. All rights reserved.
+// Copyright © 2014 Lawrence E. Bakst. All rights reserved.
+package iso11172_test
 
 // Test MPEG-1 vlc codes and make sure decoder gives proper r/l/d for each code
 
-package iso11172_test
+
 
 import "leb/mpeg-decoder/bitstream"
 import . "leb/mpeg-decoder/iso11172"

@@ -1,4 +1,5 @@
-// converted from Qt/Nokia Decoder
+// Copyright © 2013-2014 Lawrence E. Bakst. All rights reserved.
+// Provisional Copyright, tables from Qt/Nokia Decoder with no license
 
 package iso11172	// iso111722 rename on import
 

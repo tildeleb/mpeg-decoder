@@ -1,10 +1,5 @@
-package iso11172	// iso111722 rename on import
-
 // Copyright © 2003 and 2014 Lawrence E. Bakst. All rights reserved.
-// THIS SOURCE CODE IS THE PROPRIETARY INTELLECTUAL PROPERTY AND CONFIDENTIAL
-// INFORMATION OF LAWRENCE E. BAKST AND IS PROTECTED UNDER U.S. AND
-// INTERNATIONAL LAW. ANY USE OF THIS SOURCE CODE WITHOUT THE PRIOR WRITTEN
-// AUTHORIZATION OF LAWRENCE E. BAKST IS STRICTLY PROHIBITED.
+package iso11172	// iso111722 rename on import
 
 // ISO-11172-2 data structures in Go
 // transliterated from C versions written in 2003 so please excuse the C style naming 
@@ -38,7 +33,7 @@ type Mpeg1Parser interface {
 	ReadBlock(*MacroBlock, int) (*Block)
 	ReadMacroBlock(*SequenceHeader, *GroupHeader, *PictureHeader, *SliceHeader) (*MacroBlock, bool)
 	ReadRawMacroBlock(*SequenceHeader, *GroupHeader, *PictureHeader, *SliceHeader) (*MacroBlock, int, bool)
-	ReadMPEG1Steam(int, int)
+	ReadMPEG1Steam(int, int) *SequenceHeader
 
 	SetMBT(*MacroBlock, uint32, uint32, uint32, uint32, uint32)
 	SetYCbCr(*MacroBlock, uint32, uint32)
@@ -106,6 +101,7 @@ type SequenceHeader struct {
 	sh_niqmp						*Block
 	sh_extp							[]byte
 	sh_udp							[]byte
+	sh_shs							[]*SequenceHeader
 	sh_ghs							[]*GroupHeader
 	sh_phs							[]*PictureHeader // some streams don't have GOPs
 }
@@ -233,6 +229,10 @@ type MpegStats struct {
 	Blocks					int
 	LumaBlocks				int
 	ChromaBlocks			int
+	Stuffed					int
+	TotalStuffed			int
+	EscapedMB				int
+	TotalEscapedMB			int
 	Iframes					int
 	Pframes					int
 	BFrames					int
@@ -290,6 +290,10 @@ func (ms *MpegState) PrintStats() {
 	fmt.Printf("Blocks: %d\n", ms.Blocks)
 	fmt.Printf("LumaBlocks: %d\n", ms.LumaBlocks)
 	fmt.Printf("ChromaBlocks: %d\n", ms.ChromaBlocks)
+	fmt.Printf("Stuffed: %d\n", ms.Stuffed)
+	fmt.Printf("TotalStuffed: %d\n", ms.TotalStuffed)
+	fmt.Printf("EscapedMB: %d\n", ms.EscapedMB)
+	fmt.Printf("TotalEscapedMB: %d\n", ms.TotalEscapedMB)
 	fmt.Printf("Iframes: %d\n", ms.Iframes)
 	fmt.Printf("Pframes: %d\n", ms.Pframes)
 	fmt.Printf("BFrames: %d\n", ms.BFrames)
@@ -1139,8 +1143,8 @@ func MBString(args ...bool) (ret string) {
 	}
 	if l := len(ret); l > 1 {
 		ret = ret[:l-2]
-		ret += ">"
 	}
+	ret += ">"
 	return
 
 }
@@ -1173,7 +1177,9 @@ var gmbt func(*MpegState, PictureType) (uint32, uint32, uint32, uint32, uint32) 
 		}
 	}
 	if stuffed != 0 {
-		fmt.Printf("ReadRawMacroBlock: %d stuffed\n", stuffed)
+		//fmt.Printf("ReadRawMacroBlock: %d stuffed\n", stuffed)
+		ms.Stuffed++
+		ms.TotalStuffed += stuffed
 		stuffed = 0
 	}
 	
@@ -1188,7 +1194,9 @@ var gmbt func(*MpegState, PictureType) (uint32, uint32, uint32, uint32, uint32) 
 		}
 	}
 	if escaped != 0 {
-		fmt.Printf("ReadRawMacroBlock: %d escaped\n", escaped)
+		ms.EscapedMB++
+		ms.TotalEscapedMB += escaped
+		//fmt.Printf("ReadRawMacroBlock: %d escaped\n", escaped)
 		escaped = 0
 	}
 
@@ -1210,7 +1218,7 @@ var gmbt func(*MpegState, PictureType) (uint32, uint32, uint32, uint32, uint32) 
 	}
 	ms.SetMBT(&cmb, in, pa, mb, mf, qf)
 	//fmt.Printf("%s\n", MBString(in, pa, mb, mf, qf))
-	ms.CBPS[MBString(cmb.mbt_pa, cmb.mbt_mb, cmb.mbt_mf, cmb.mbt_qf)]++
+	ms.CBPS[MBString(cmb.mbt_in, cmb.mbt_pa, cmb.mbt_mb, cmb.mbt_mf, cmb.mbt_qf)]++
 
 	if cmb.mbt_qf {
 		cmb.mbt_qs = ms.Russ(5)
@@ -1331,8 +1339,6 @@ func (ms *MpegState) ReadMacroBlock(sh *SequenceHeader, gh *GroupHeader, ph *Pic
 		fmt.Printf("\n")
 		}
 	}
-	ph.ph_mbs = append(ph.ph_mbs, mb)
-	sl.sl_mbs = append(sl.sl_mbs, mb)
 	ms.MacroBlockCtr++
 	ms.MacroBlocks++
 	if ms.SkipCnt > 0 {
@@ -1345,8 +1351,8 @@ func (ms *MpegState) ReadMacroBlock(sh *SequenceHeader, gh *GroupHeader, ph *Pic
 }
 
 
-func iterateSlices(sh *SequenceHeader) {
-	var ghc, phc, mb1c, mb2c int
+func IterateSlices(sh *SequenceHeader) {
+	var ghc, phc, mb1c, mb2c, mb3c int
 
 	for _, gh := range sh.sh_ghs {
 		ghc++
@@ -1356,15 +1362,26 @@ func iterateSlices(sh *SequenceHeader) {
 				k3++
 				mb1c++
 			}
-			for k4, _ := range ph.ph_mbs {
+		}
+	}
+	for _, ph := range sh.sh_phs {
+		for k3, _ := range ph.ph_mbs {
+			k3++
+			mb2c++
+		}
+	}
+
+	for _, ph := range sh.sh_phs {
+		for _, sl := range ph.ph_sls {
+			for k4, _ := range sl.sl_mbs {
 				k4++
-				mb2c++
+				mb3c++
 			}
 		}
 	}
 
 	fmt.Printf("sh_ghs=%d, sh_phs=%d, gh_phs=%d\n", len(sh.sh_ghs), len(sh.sh_phs), len(sh.sh_ghs[0].gh_phs))
-	fmt.Printf("ghc=%d, phc=%d, mb1c=%d, mb2c=%d\n", ghc, phc, mb1c, mb2c)
+	fmt.Printf("ghc=%d, phc=%d, mb1c=%d, mb2c=%d, mb3c=%d\n", ghc, phc, mb1c, mb2c, mb3c)
 /*
 	fmt.Printf("sh_ghs=%d, sh_phs=%d, gh_phs=%d, len(sh.sh_ghs), len(sh.sh_phs), len(gh.gh_phs))
 	ph_sls=%d, ph_mbs=%d, sl_mbs=%d\n",
@@ -1372,8 +1389,8 @@ func iterateSlices(sh *SequenceHeader) {
 */
 }
 
-func (ms *MpegState) ReadMPEG1Steam(from, to int) {
-var sh				*SequenceHeader
+func (ms *MpegState) ReadMPEG1Steam(from, to int) *SequenceHeader {
+var fsh				*SequenceHeader
 var gh				*GroupHeader
 var ph				*PictureHeader
 var slh				*SliceHeader
@@ -1399,6 +1416,9 @@ var	vscf			bool
 */
 
 ms.MacroBlockCtr = 0
+
+//fmt.Printf("%s\n", MBString(true, true, true, true, true))
+//return
 
 //fmt.Printf("ReadMPEG1Steam: from=%d, to=%d, readMacroBlocks=%v, printMacroBlocks=%v\n", from, to, readMacroBlocks, printMacroBlocks)
 findstartcode:
@@ -1435,11 +1455,14 @@ findstartcode:
 		}
 		switch {
 		case start_code == SEQ_HEADER_CODE:
-			sh = ms.ReadSeqenceHeader()
+			sh := ms.ReadSeqenceHeader()
 			if ms.PrintHeaders {
 				fmt.Printf("SEQ_HEADER_CODE\n")
 				fmt.Printf("    sh_hor_size=%d, sh_ver_size=%d, sh_pel_aspect_ratio=%d, sh_picture_rate=%d, sh_bit_rate=%d\n",
 					sh.sh_hor_size, sh.sh_ver_size, sh.sh_pel_aspect_ratio, sh.sh_picture_rate, sh.sh_bit_rate)
+			}
+			if fsh == nil {
+				fsh = sh
 			}
 		case start_code == GROUP_START_CODE:
 			gh = ms.ReadGroupHeader()
@@ -1447,16 +1470,16 @@ findstartcode:
 				fmt.Printf("GROUP_START_CODE TC=%02d:%02d:%02d:%02d marker=%v, dff=%v\n",
 					gh.gh_tc_hr, gh.gh_tc_min, gh.gh_tc_sec, gh.gh_tc_pic, gh.gh_marker_bit, gh.gh_drop_frame_flag)
 			}
-			sh.sh_ghs = append(sh.sh_ghs, gh)
+			fsh.sh_ghs = append(fsh.sh_ghs, gh)
 		case start_code == PICTURE_START_CODE:
 			ph = ms.ReadPictureHeader()
 			gh.gh_phs = append(gh.gh_phs, ph)
-			sh.sh_phs = append(sh.sh_phs, ph)
+			fsh.sh_phs = append(fsh.sh_phs, ph)
 			if ms.PrintHeaders {
 				fmt.Printf("\nFrame: %d\n", ms.FrameCtr)
 				fmt.Printf("PICTURE_START_CODE type=%s\n", pt_str[ph.ph_picture_type])
 				fmt.Printf("    ph_temporal_ref=%d, ph_vbv_delay=%d\n", ph.ph_temporal_ref, ph.ph_vbv_delay)
-				fmt.Printf("    sh_ghs=%d, sh_phs=%d, gh_phs=%d\n", len(sh.sh_ghs), len(sh.sh_phs), len(sh.sh_ghs[0].gh_phs))
+				fmt.Printf("    sh_ghs=%d, sh_phs=%d, gh_phs=%d\n", len(fsh.sh_ghs), len(fsh.sh_phs), len(fsh.sh_ghs[0].gh_phs))
 			}
 			switch ph.ph_picture_type {
 			case pt_ipict:
@@ -1481,7 +1504,7 @@ findstartcode:
 			}
 		case start_code == USER_DATA_START_CODE:
 			fmt.Printf("USER_DATA_START_CODE\n")
-			panic("USER_DATA_START_CODE")
+			//panic("USER_DATA_START_CODE")
 		case start_code == SEQ_ERROR_CODE:
 			fmt.Printf("SEQ_ERROR_CODE\n")
 		case start_code == EXTENSION_START_CODE:
@@ -1493,9 +1516,7 @@ findstartcode:
 			if ms.PrintHeaders {
 				fmt.Printf("SEQ_END_CODE\n")
 			}
-			iterateSlices(sh)
-			return
-			break // ???
+			return fsh
 		case start_code == ISO_11172_END_CODE:
 			fmt.Printf("ISO_11172_END_CODE\n")
 		case start_code == PACK_START_CODE:
@@ -1534,7 +1555,7 @@ findstartcode:
 			//os.Stdout.Sync()
 			for {
 				//fmt.Printf("MacroBlockCtr=%d\n", ms.MacroBlockCtr)
-				mb, eomb := ms.ReadMacroBlock(sh, gh, ph, slh)
+				mb, eomb := ms.ReadMacroBlock(fsh, gh, ph, slh)
 				ph.ph_mbs = append(ph.ph_mbs, mb)
 				slh.sl_mbs = append(slh.sl_mbs, mb)
 				//ms.MacroBlockCtr++
