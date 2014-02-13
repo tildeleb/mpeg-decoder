@@ -1,5 +1,6 @@
 mpeg-decoder
 ============
+*Codebase currently under heavy development*
 
 Simple, expositional mpeg-1 decoder written in pure go; not a production quality decoder.
 
@@ -9,9 +10,9 @@ Note: the code was transliterated from some (incomplete) C code I wrote a number
 
 Currently the decoder is able to parse mpeg-1 files (IBP frames) and store all the decoded data structures in memory. Note only the ISO-171172-2 file format is supported. The packetized format is not currently supported.
 
-Running the program will parse the entire bitstream. If there are no errors there are no results.
+Running the program will parse the entire bitstream. If there are no errors there is no output.
 
-MPEG-1 has very little redundancy, the results with corrupted streams are undefined. *This is not a valeting parser*
+MPEG-1 has very little redundancy. Results with corrupted streams are not defined. *This is not a validating parser*
 
 Having said that, the parser does contain an exception based mechanism that could be used to recover from an error and scan for the next start code such as a video slice start code.
 
@@ -22,13 +23,19 @@ Flags
 -----
 There are flags to print various data structures along the way.
 
-`-v prints everything`
+ -from=0: start at frame #  
+  -pbc=false: print block coefficients  
+  -phd=false: print headers  
+  -pmb=false: print macro blocks  
+  -prmb=false: print raw macro blocks  
+  -ps=false: print stats  
+  -pvs=false: print video slices  
+  -rmb=true: read macro blocks  
+  -to=9999999: stop at frame #  
+  -v=false: verbose; turns on most printing
 
-`-ps shows some stats at the end`
-
-`other flags in the usage line`
-
-There are two packages used.
+Packages
+--------
 
 **iso11172** - This package is basically a toolkit to parse mpeg streams. The current parser will soon be moved out of this package and it is more of an application.
 
@@ -42,7 +49,7 @@ Things you may want that this package doesn't have
 
 • demuxer: It would be nice to have one as more files would be readable. Should be easy to do with Go Routines. Might attempt this.
 
-• de-interlacing: MPEG-1 is suppose to be progressive only but that's often not the case.
+• de-interlacing: MPEG-1 is defined to be a progressive only video format, but that's often not the case.
 
 • de-blocking filter
 • sharpening filter
