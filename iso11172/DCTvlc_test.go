@@ -2,9 +2,6 @@
 package iso11172_test
 
 // Test MPEG-1 vlc codes and make sure decoder gives proper r/l/d for each code
-
-
-
 import "leb/mpeg-decoder/bitstream"
 import . "leb/mpeg-decoder/iso11172"
 //import "flag"
