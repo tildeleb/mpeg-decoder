@@ -41,26 +41,26 @@ Packages
 
 **bitstream** - This package provides routines to parse a variable length bitstream. There is a routine Getbits() to get 1-32 bits and a routine Peekbits() to peek ahead 1-32 bits. Benchamrked on my 2.5 GHz i7 laptop at about 250 Mbit/sec linear read rate.
 
-Things you may want that this package doesn't have
---------------------------------------------------
+Features this package doesn't have
+----------------------------------
 • MPEG-2: Possible, but much more work as there are so many options and variations. Testing and validation would be a huge issue.
 
-• audio:  Need a demuxer for that as well as the audio support and a way to play it back and sync it to the video. Almost certainly need clock support to do it right. I am kind of a nut for A/V sync so this would be a big deal. Also tough to validate without some quality test files which I don't have.
+• audio:  Need a demuxer for that as well as the audio support and a way to play it back and sync it to the video. Almost certainly need clock support to do it right. I am kind of a nut for A/V sync so this would be a big deal. Also tough to validate without some quality test files which I don't have, although maybe they can be generated with ffmpeg.
 
 • demuxer: It would be nice to have one as more files would be readable. Should be easy to do with Go Routines. Might attempt this.
 
 • de-interlacing: MPEG-1 is defined to be a progressive only video format, but that's often not the case.
 
-• de-blocking filter
-• sharpening filter
-• post processing
-• gamma support
-• accurate color
-• good performance
-• efficiency
-• support for player controls such fast forward, fast backward, slow motion, …
-• brightness, contrast, and color controls
-• scaling of video to window size
+• de-blocking filter  
+• sharpening filter  
+• post processing  
+• gamma support  
+• accurate color  
+• good performance  
+• efficiency  
+• support for player controls such fast forward, fast backward, slow motion, …  
+• brightness, contrast, and color controls  
+• scaling of video to window size  
 
 
 
