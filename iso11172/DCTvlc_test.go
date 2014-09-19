@@ -19,9 +19,9 @@ type DCTvlc struct {
 	v		*[]byte		// warning only the low order nibble of each byte is used to form the VLC. It was easier to type in that way.
 }
 
-var vlcmap map[uint32]DCTvlc = make(map[uint32]DCTvlc, 10)
+var vlcmap = make(map[uint32]DCTvlc, 10)
 
-var vlcs []DCTvlc =  []DCTvlc{
+var vlcs = []DCTvlc{
 //	{0, 1, 2, 0, &[]byte{0x1}},
 	{0, 1, 3, 0, &[]byte{0x3}},
 	{0, 2, 5, 0, &[]byte{0x4}},

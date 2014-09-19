@@ -156,7 +156,7 @@ func NewFromMemory(b []byte, mode string) (*Bitstream, error) {
 // It returns the number of bytes read.
 // EOF is signaled by a zero count with err set to io.EOF.
 func (m *Memory) Read(b []byte) (n int, err error) {
-	var dbg bool = false
+	var dbg = false
 	if m == nil {
  		return 0, os.ErrInvalid
 	}
@@ -217,7 +217,7 @@ func (bs *Bitstream) PrintState(msg string) {
 }
 
 func (bs *Bitstream) readbits() error {
-	var dbg bool = false || bs.printfill
+	var dbg = false || bs.printfill
 	//fmt.Printf("bitstream.readbits: Read()\n")
 	if bs.eof {
 		return io.EOF
@@ -275,7 +275,7 @@ func (bs *Bitstream) readbits() error {
 
 
 func (bs *Bitstream) getbits2(bits uint) (uint32, error) {
-var rbits uint = bits
+var rbits = bits
 // var tmp uint
 var ret uint32
 var fbits uint
@@ -338,7 +338,7 @@ var fbits uint
 
 // same as above but just peek, don't update any counters
 func (bs *Bitstream) peekbits2(bits uint) (uint32, error) {
-var rbits uint = bits
+var rbits = bits
 var ret uint32 = 0
 
 	//fmt.Printf("bitstream.peekbits2: rbits=%d/tbits=%d, bits=%d, nbits=%d, eof=%v, rbits=%d\n", bs.rbits, bs.tbits, bs.bits, bs.nbits, bs.eof, bits);

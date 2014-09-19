@@ -10,14 +10,14 @@ const Next2		uint16 = 0xbeef
 const Escape	uint16 = 0x080b
 const Stuffing	uint16 = 0x0f0b
 
-var macroblockAddressIncrement []uint16 = []uint16{
+var macroblockAddressIncrement = []uint16{
 		Next1,   Next2, 0x0705, 0x0605, 0x0504, 0x0504, 0x0404, 0x0404,
 		0x0303, 0x0303, 0x0303, 0x0303, 0x0203, 0x0203, 0x0203, 0x0203,
 		0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
 		0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
 }
 
-var macroblockAddressIncrement2 []uint16 = []uint16{
+var macroblockAddressIncrement2 = []uint16{
 	0x0d08, 0x0d08, 0x0d08, 0x0d08, 0x0d08, 0x0d08, 0x0d08, 0x0d08,
 	0x0c08, 0x0c08, 0x0c08, 0x0c08, 0x0c08, 0x0c08, 0x0c08, 0x0c08,
 	0x0b08, 0x0b08, 0x0b08, 0x0b08, 0x0b08, 0x0b08, 0x0b08, 0x0b08,
@@ -28,7 +28,7 @@ var macroblockAddressIncrement2 []uint16 = []uint16{
 	0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807, 0x0807,
 }
 
-var macroblockAddressIncrement1 []uint16 = []uint16{
+var macroblockAddressIncrement1 = []uint16{
 	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 	Escape, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, Stuffing,
 	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
@@ -63,16 +63,16 @@ func (ms *MpegState) GetMacroblockAddressIncrement() (ret uint32) {
 
 
 
-var macroblockTypeI []uint8 = []uint8{0x00, 0x12, 0x01, 0x01}
+var macroblockTypeI = []uint8{0x00, 0x12, 0x01, 0x01}
 
-var macroblockTypeP []uint16 = []uint16{
+var macroblockTypeP = []uint16{
 	0x0000, 0x1106, 0x1205, 0x1205, 0x1a05, 0x1a05, 0x0105, 0x0105,
 	0x0803, 0x0803, 0x0803, 0x0803, 0x0803, 0x0803, 0x0803, 0x0803,
 	0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202,
 	0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202, 0x0202,
 }
 
-var macroblockTypeB []uint16 = []uint16{
+var macroblockTypeB = []uint16{
 	0x0000, 0x1106, 0x1606, 0x1a06, 0x1e05, 0x1e05, 0x0105, 0x0105,
 	0x0804, 0x0804, 0x0804, 0x0804, 0x0a04, 0x0a04, 0x0a04, 0x0a04,
 	0x0403, 0x0403, 0x0403, 0x0403, 0x0403, 0x0403, 0x0403, 0x0403,
@@ -141,7 +141,7 @@ func (ms *MpegState) GetMacroblockType(pt PictureType) (in, pa, mb, mf, qf uint3
 }
 
 
-var motionVector []uint32 = []uint32{
+var motionVector = []uint32{
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
@@ -160,7 +160,7 @@ var motionVector []uint32 = []uint32{
 	0xfffffc07, 0xfffffc07, 0xfffffc07, 0xfffffc07, 0xfffffc07, 0xfffffc07, 0xfffffc07, 0xfffffc07,
 }
 
-var motionVector1 []uint32 = []uint32{
+var motionVector1 = []uint32{
 	0x00000000, 0x00000000, 0x00000305, 0xfffffd05, 0x00000204, 0x00000204, 0xfffffe04, 0xfffffe04,
 	0x00000103, 0x00000103, 0x00000103, 0x00000103, 0xffffff03, 0xffffff03, 0xffffff03, 0xffffff03,
 	0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
@@ -186,7 +186,7 @@ func (ms *MpegState) GetMotionVector() int16 {
 		return int16(value)
 	}
 
-var codedBlockPattern []uint16 = []uint16{
+var codedBlockPattern = []uint16{
 	0x0000, 0x0000, 0x2709, 0x1b09, 0x3b09, 0x3709, 0x2f09, 0x1f09,
 	0x3a08, 0x3a08, 0x3608, 0x3608, 0x2e08, 0x2e08, 0x1e08, 0x1e08,
 	0x3908, 0x3908, 0x3508, 0x3508, 0x2d08, 0x2d08, 0x1d08, 0x1d08,
@@ -279,12 +279,12 @@ func (ms *MpegState) GetCodedBlockPattern() (lumabits, chromabits uint32){
 	return
 }
 
-var dctDcSizeLuminance []uint16 = []uint16{
+var dctDcSizeLuminance = []uint16{
 	0x12, 0x12, 0x12, 0x12, 0x22, 0x22, 0x22, 0x22,
 	0x03, 0x03, 0x33, 0x33, 0x43, 0x43, 0x54, 0x00,
 }
 
-var dctDcSizeLuminance1 []uint16 = []uint16{
+var dctDcSizeLuminance1 = []uint16{
 	0x65, 0x65, 0x65, 0x65, 0x76, 0x76, 0x87, 0x00,
 }
 
@@ -298,12 +298,12 @@ func (ms *MpegState) DecodeDCTDCSizeLuminance() int32 {
 	return int32(value) >> 4
 }
 
-var dctDcSizeChrominance []uint16 = []uint16{
+var dctDcSizeChrominance = []uint16{
 	0x02, 0x02, 0x02, 0x02, 0x12, 0x12, 0x12, 0x12,
 	0x22, 0x22, 0x22, 0x22, 0x33, 0x33, 0x44, 0x00,
 }
 
-var dctDcSizeChrominance1 []uint16 = []uint16{
+var dctDcSizeChrominance1 = []uint16{
 	0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
 	0x66, 0x66, 0x66, 0x66, 0x77, 0x77, 0x88, 0x00,
 }
@@ -341,7 +341,7 @@ func (ms *MpegState) ReadDCDC2(size uint) (ret int32) {
 // Total number of entries 16 * 32 = 512
 // First 32 entries are not used in fact
 
-var dctCoefficients [][3]int8 = [][3]int8{
+var dctCoefficients = [][3]int8{
 	// 0000 0000 0000 xxxx x
 	{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0},
 	{0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0},
@@ -500,7 +500,7 @@ var dctCoefficients [][3]int8 = [][3]int8{
 }
 
 // 0000 0001 xxxx s??? ?
-var dctCoefficients1 [][3]int8 = [][3]int8{
+var dctCoefficients1 = [][3]int8{
 	{0, 11, 13}, {0, -11, 13}, {8,  2, 13}, {8,  -2, 13},
 	{4,  3, 13}, {4,  -3, 13}, {0, 10, 13}, {0, -10, 13},
 	{2,  4, 13}, {2,  -4, 13}, {7,  2, 13}, {7,  -2, 13},
@@ -512,19 +512,19 @@ var dctCoefficients1 [][3]int8 = [][3]int8{
 }
 
 // 0000 0010 xxs? ???? ?
-var dctCoefficients2 [][3]int8 = [][3]int8{
+var dctCoefficients2 = [][3]int8{
 	{16, 1, 11}, {16, -1, 11}, {5, 2, 11}, {5, -2, 11},
 	{ 0, 7, 11}, { 0, -7, 11}, {2, 3, 11}, {2, -3, 11},
 }
 
 // 0000 0011 xxs? ???? ?
-var dctCoefficients3 [][3]int8 = [][3]int8{
+var dctCoefficients3 = [][3]int8{
 	{1 , 4, 11}, {1 , -4, 11}, {15, 1, 11}, {15, -1, 11},
 	{14, 1, 11}, {14, -1, 11}, {4 , 2, 11}, {4 , -2, 11},
 }
 
 // 0000 xxxs ???? ???? ?
-var dctCoefficients4 [][3]int8 = [][3]int8{
+var dctCoefficients4 = [][3]int8{
 	{0, 0, 0}, {0,  0, 0}, {0, 0, 0}, {0,  0, 0},
 	{0, 0, 6}, {0,  0, 6}, {0, 0, 6}, {0,  0, 6},     // ESCAPE
 	{2, 2, 8}, {2, -2, 8}, {9, 1, 8}, {9, -1, 8},

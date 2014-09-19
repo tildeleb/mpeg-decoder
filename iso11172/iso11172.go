@@ -55,9 +55,9 @@ const (
 	pt_dpict = 4
 )
 
-var pt_str []string = []string{"0 pict", "I pict", "P pict", "B pict", "D pict"}
+var pt_str = []string{"0 pict", "I pict", "P pict", "B pict", "D pict"}
 
-var b3_to_PT []PictureType = []PictureType{pt_forbid, pt_ipict, pt_ppict, pt_bpict, pt_dpict, pt_forbid, pt_forbid, pt_forbid}
+var b3_to_PT = []PictureType{pt_forbid, pt_ipict, pt_ppict, pt_bpict, pt_dpict, pt_forbid, pt_forbid, pt_forbid}
 
 /* Video codes */
 const PICTURE_START_CODE		= 0x100
