@@ -3,10 +3,11 @@ package main
 
 import "fmt"
 import "flag"
+
 //import "os"
 //import "io"
-import "leb/mpeg-decoder/bitstream"
-import "leb/mpeg-decoder/iso11172"
+import "leb.io/mpeg-decoder/bitstream"
+import "leb.io/mpeg-decoder/iso11172"
 
 var phdf = flag.Bool("phd", false, "print headers")
 var pvsf = flag.Bool("pvs", false, "print video slices")
@@ -26,7 +27,7 @@ func chk(i iso11172.Mpeg1Parser) {
 	if ok {
 		//fmt.Printf("OK")
 	} else {
-		fmt.Printf("BAD")	
+		fmt.Printf("BAD")
 	}
 }
 
@@ -54,11 +55,3 @@ func main() {
 		}
 	}
 }
-
-
-
-
-
-
-
-

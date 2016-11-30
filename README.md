@@ -1,10 +1,11 @@
 mpeg-decoder
 ============
-*Codebase currently under heavy development*
 
 Simple, expositional mpeg-1 decoder written in pure go; not a production quality decoder.
 
-Soon to be added will be the code to perform the iDCT and pixel reconstruction. A (very) simple video viewer (vogl) based on OpenGL is planned.
+Soon to be added will be the code to perform the iDCT and pixel reconstruction.
+
+A (very) simple video viewer (vogl) based on OpenGL is planned.
 
 Note: the code was transliterated from some (incomplete) C code I wrote a number of years ago. The code itself is not too bad at this point. However, some of the structure names still use old style C naming.
 
@@ -16,7 +17,7 @@ MPEG-1 has very little redundancy. Results with corrupted streams are not define
 
 Having said that, the parser does contain an exception based mechanism that could be used to recover from an error and scan for the next start code such as a video slice start code. While the exception mechanism is in place the restart code is not, nor are all the panics that are needed.
 
-On that subject, checking for errors when making many calls to read a few bits at a time is tedious. The bitstream code doesn't return errors on read although there are internal, non exported functions that do. Instead they throw a panic when they get an error, e.g. EOF after reading the last bit. That "exception" can be caught.
+On that subject, checking for errors when making many calls to read a few bits at a time is tedious. The bitstream code doesn't return errors on read although there are internal, non exported functions that do. Instead they throw a panic when they get an error, e.g. EOF after reading the last bit. That "exception" can be caught. This was really an experiment to understand better if Go's panic style exceptions could be used for error handling. I am *well* aware that Go style strongly eschews that use.
 
 
 Flags
